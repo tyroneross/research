@@ -131,6 +131,13 @@ Run searches and fetches in parallel where independent. Minimize sequential roun
 3. Extract specific data points, not general impressions
 4. Track source URL and date for every finding
 
+**For non-HTML sources** (PDFs, Excel, PowerPoint, Python source, whole docs directories):
+Use `/research:extract <path>` — routes everything through `@tyroneross/omniparse` (user-authored, MIT) with a content-hash cache.
+- Handles PDF, `.xlsx/.xls/.csv/.tsv/.ods/.xlsb`, `.pptx`, `.py`, and directories (`-r`).
+- Short PDFs (≤10 pages, simple text) are often better served by Claude's native `Read` with `pages=` — no extraction needed.
+- HTML URLs are rejected with a pointer to `WebFetch`. Plain text formats (`.md`/`.txt`/`.json`/`.yaml`) are rejected with a pointer to `Read`.
+- See `references/persistence.md` for the full decision table and cache behavior.
+
 **For technical/codebase research:**
 1. Start with official documentation (fetch docs URLs directly)
 2. Check GitHub repos — stars, last commit, open issues, release cadence

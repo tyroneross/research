@@ -12,7 +12,7 @@ Central, token-efficient research knowledge base. Persists findings to `~/resear
 
 ## Entry point
 
-- Slash commands: `/research:init`, `/research:save`, `/research:search`, `/research:list`, `/research:link`, `/research:index`, `/research:archive`, `/research:score`, `/research:verify`, `/research:review`, `/research:compress`
+- Slash commands: `/research:init`, `/research:save`, `/research:search`, `/research:list`, `/research:link`, `/research:index`, `/research:archive`, `/research:score`, `/research:verify`, `/research:review`, `/research:compress`, `/research:extract`
 - Direct: `python ${CLAUDE_PLUGIN_ROOT}/research.py <subcommand>`
 - Via skill: user language matching the `research` skill's description triggers the full-flow, which ends by persisting via Phase 6.
 
@@ -26,7 +26,8 @@ Central, token-efficient research knowledge base. Persists findings to `~/resear
 
 - Required: `PyYAML` (frontmatter parsing).
 - Optional (v0.2+): `sympy` for symbolic math verification. Graceful skip if absent.
-- Everything else is Python stdlib or Claude Code built-in tools.
+- Optional (extraction): `@tyroneross/omniparse` CLI (Node.js, user-authored, MIT) — powers `/research:extract` for PDF, Excel, PPTX, Python, and directories. Resolved in order: `shutil.which("omniparse")`, then the built dist at `~/Desktop/git-folder/Omniparse/packages/sdk/dist/bin/omniparse.js` via `node`, then `npx --prefix <repo-root> omniparse`. If none found, the command prints a build hint.
+- Everything else is Python stdlib or Claude Code built-in tools. No AGPL deps, no model-weight downloads, no external Python extraction libraries.
 
 ## Not to do
 

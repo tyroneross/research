@@ -1,3 +1,9 @@
 PyYAML>=6.0
-# Optional (v0.2 symbolic verification):
+
+# Optional — symbolic math claim verification (v0.2):
 # sympy>=1.12
+
+# Extraction: /research:extract routes through @tyroneross/omniparse (Node.js,
+# user-authored). Install/build it via:
+#   cd ~/Desktop/git-folder/Omniparse && npm install && npm run build
+# No additional Python dependencies are required for extraction.

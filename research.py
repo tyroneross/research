@@ -4,6 +4,7 @@
 Subcommands (v0.1): init, save, search, list, link, index, archive
 Subcommands (v0.2): score, verify
 Subcommands (v0.3): review, compress
+Subcommands (bridges): extract (Omniparse)
 
 Data lives at ~/research/. SQLite FTS5 is the index. Claude Code's
 WebFetch/Read are assumed to have already extracted source content
@@ -1356,6 +1357,228 @@ def cmd_compress(args: argparse.Namespace) -> int:
     return 0
 
 
+# ---------- extract (Omniparse-only router) ----------
+#
+# Single backend: @tyroneross/omniparse CLI (Node.js, user-authored, MIT).
+# Handles PDF, Excel, PPTX, Python, and directories. HTML URLs and plain
+# text formats (.md/.txt/.json/.yaml) are routed to Claude's built-in tools
+# (WebFetch, Read) with a clear message — no extraction needed.
+#
+# All successful extracts flow through a SHA-256 content-hash cache at
+# ~/research/.extract-cache/<hash>-<flags>.md so re-reads are instant.
+# --no-cache bypasses.
+
+import hashlib
+
+EXTRACT_CACHE_DIR = BASE_DIR / ".extract-cache"
+
+# Extensions Omniparse handles (PDF included).
+OMNIPARSE_EXTS = {
+    ".pdf",
+    ".xlsx", ".xls", ".csv", ".tsv", ".ods", ".xlsb",
+    ".pptx",
+    ".py",
+}
+
+# Read-native formats — caller should use Claude's Read tool directly.
+READ_NATIVE_EXTS = {".md", ".markdown", ".txt", ".json", ".yaml", ".yml"}
+
+# Fallback location for the built Omniparse dist in the monorepo.
+OMNIPARSE_REPO_ROOT = Path.home() / "Desktop" / "git-folder" / "Omniparse"
+OMNIPARSE_KNOWN_BIN = (
+    OMNIPARSE_REPO_ROOT / "packages" / "sdk" / "dist" / "bin" / "omniparse.js"
+)
+
+
+def _find_omniparse() -> list[str] | None:
+    """Command list to invoke Omniparse CLI, or None if unavailable.
+    Resolution order:
+      1. `omniparse` on PATH (globally installed or symlinked).
+      2. Built dist invoked via `node` at the known monorepo location.
+      3. `npx --prefix <repo-root> omniparse` (lets npx resolve the package).
+    """
+    exe = shutil.which("omniparse")
+    if exe:
+        return [exe]
+    node = shutil.which("node")
+    if node and OMNIPARSE_KNOWN_BIN.exists():
+        return [node, str(OMNIPARSE_KNOWN_BIN)]
+    npx = shutil.which("npx")
+    if npx and OMNIPARSE_REPO_ROOT.exists():
+        return [npx, "--prefix", str(OMNIPARSE_REPO_ROOT), "omniparse"]
+    return None
+
+
+def _cache_flag_signature(args: argparse.Namespace) -> str:
+    """Stable representation of the Omniparse-affecting flags for cache key."""
+    parts = [
+        f"f={args.format or ''}",
+        f"r={int(bool(args.recursive))}",
+        f"sheet={args.sheet or ''}",
+        f"no_notes={int(bool(args.no_notes))}",
+    ]
+    return "|".join(parts)
+
+
+def _cache_key(path: Path, flag_sig: str) -> str:
+    """SHA-256 of file bytes + flag signature; hex. Stable across runs.
+    For directories, hashes a listing of (name, size, mtime) tuples."""
+    h = hashlib.sha256()
+    if path.is_dir():
+        entries = []
+        for p in sorted(path.rglob("*")):
+            if p.is_file():
+                st = p.stat()
+                entries.append(f"{p.relative_to(path)}:{st.st_size}:{int(st.st_mtime)}")
+        h.update("\n".join(entries).encode())
+    else:
+        with path.open("rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+    h.update(flag_sig.encode())
+    return h.hexdigest()
+
+
+def _cache_get(key: str) -> str | None:
+    p = EXTRACT_CACHE_DIR / f"{key}.md"
+    if p.exists():
+        return p.read_text()
+    return None
+
+
+def _cache_put(key: str, markdown: str) -> None:
+    EXTRACT_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    (EXTRACT_CACHE_DIR / f"{key}.md").write_text(markdown)
+
+
+def _run_omniparse(args: argparse.Namespace, path: Path) -> tuple[int, str | None]:
+    """Invoke Omniparse CLI. Returns (exit_code, captured_stdout_or_None).
+    stdout is captured so we can both emit it and cache it. When --output is
+    set, we pass -o through and return (rc, None)."""
+    cmd_prefix = _find_omniparse()
+    if cmd_prefix is None:
+        print(
+            "ERROR: Omniparse CLI not found. Install or build it:\n"
+            f"  cd {OMNIPARSE_REPO_ROOT} && npm install && npm run build\n"
+            "Or install globally so `omniparse` is on PATH.",
+            file=sys.stderr,
+        )
+        return 3, None
+
+    cli = list(cmd_prefix) + [str(path)]
+    if args.format:
+        cli += ["-f", args.format]
+    if args.recursive:
+        cli += ["-r"]
+    if args.output:
+        cli += ["-o", args.output]
+    if args.quiet:
+        cli += ["-q"]
+    if args.sheet:
+        cli += ["--sheet", args.sheet]
+    if args.no_notes:
+        cli += ["--no-notes"]
+
+    try:
+        proc = subprocess.run(cli, capture_output=True, text=True, timeout=180)
+    except subprocess.TimeoutExpired:
+        print("ERROR: Omniparse timed out (180s)", file=sys.stderr)
+        return 4, None
+    except FileNotFoundError as e:
+        print(f"ERROR: could not invoke Omniparse: {e}", file=sys.stderr)
+        return 4, None
+
+    if proc.stderr and not args.quiet:
+        sys.stderr.write(proc.stderr)
+    if proc.returncode != 0:
+        return proc.returncode, None
+    if args.output:
+        print(f"Wrote {args.output}", file=sys.stderr)
+        return 0, None
+    return 0, proc.stdout
+
+
+def cmd_extract(args: argparse.Namespace) -> int:
+    target = args.target
+
+    if target.startswith(("http://", "https://")):
+        print(
+            "This is a URL. Use Claude's WebFetch tool for HTML pages. If you "
+            "downloaded the file locally, re-run with the local path.",
+            file=sys.stderr,
+        )
+        return 2
+
+    path = Path(target).expanduser().resolve()
+    if not path.exists():
+        print(f"ERROR: path does not exist: {path}", file=sys.stderr)
+        return 2
+
+    # Directory: Omniparse walks recursively when -r is passed.
+    if path.is_dir():
+        if not args.recursive:
+            print(
+                f"'{path}' is a directory. Pass -r/--recursive to process its "
+                f"contents (Omniparse walks and concatenates).",
+                file=sys.stderr,
+            )
+            return 2
+        return _extract_and_cache(args, path)
+
+    ext = path.suffix.lower()
+
+    # Route HTML and plain-text formats back to Claude's built-in tools.
+    if ext in (".html", ".htm"):
+        print(
+            "Local HTML file. Use WebFetch for URLs, or Read for a local HTML "
+            "file — Omniparse does not add value here.",
+            file=sys.stderr,
+        )
+        return 2
+    if ext in READ_NATIVE_EXTS:
+        print(
+            f"'{ext}' files are best handled by Claude's Read tool directly "
+            f"(no extraction needed).",
+            file=sys.stderr,
+        )
+        return 2
+    if ext not in OMNIPARSE_EXTS:
+        supported = ", ".join(sorted(OMNIPARSE_EXTS))
+        print(
+            f"Extension '{ext}' is not supported by Omniparse. Supported: "
+            f"{supported}. For .md/.txt/.json/.yaml use Claude's Read tool.",
+            file=sys.stderr,
+        )
+        return 2
+
+    return _extract_and_cache(args, path)
+
+
+def _extract_and_cache(args: argparse.Namespace, path: Path) -> int:
+    """Cache-aware Omniparse dispatch. Streams stdout OR writes --output."""
+    flag_sig = _cache_flag_signature(args)
+    use_cache = not args.no_cache and args.output is None
+
+    if use_cache:
+        key = _cache_key(path, flag_sig)
+        cached = _cache_get(key)
+        if cached is not None:
+            if not args.quiet:
+                print(f"(cache hit: {key[:12]})", file=sys.stderr)
+            sys.stdout.write(cached)
+            return 0
+
+    rc, captured = _run_omniparse(args, path)
+    if rc != 0:
+        return rc
+
+    if captured is not None:
+        sys.stdout.write(captured)
+        if use_cache:
+            _cache_put(_cache_key(path, flag_sig), captured)
+    return 0
+
+
 # ---------- main / argparse ----------
 
 def main() -> int:
@@ -1423,6 +1646,26 @@ def main() -> int:
     sp = sub.add_parser("compress", help="Archive Raw, prep for Claude rewrite")
     sp.add_argument("slug")
     sp.set_defaults(func=cmd_compress)
+
+    sp = sub.add_parser(
+        "extract",
+        help="Extract PDF / Excel / PPTX / Python / directory via Omniparse (cached)",
+        description=(
+            "Routes all extraction through @tyroneross/omniparse. HTML URLs and "
+            ".md/.txt/.json/.yaml files are rejected with a pointer to "
+            "Claude's WebFetch/Read tools. Results are cached at "
+            "~/research/.extract-cache/ keyed by file SHA-256 + flag signature."
+        ),
+    )
+    sp.add_argument("target", help="Local file path or directory (URLs are rejected — use WebFetch)")
+    sp.add_argument("--no-cache", action="store_true", help="Skip content-hash cache (force re-extract)")
+    sp.add_argument("-f", "--format", choices=["markdown", "text", "json"], help="Output format for Omniparse (default: markdown)")
+    sp.add_argument("-o", "--output", help="Write to file instead of stdout")
+    sp.add_argument("-r", "--recursive", action="store_true", help="Process directory contents (required for directories)")
+    sp.add_argument("-q", "--quiet", action="store_true", help="Suppress progress messages")
+    sp.add_argument("--sheet", help="Excel: specific sheet name")
+    sp.add_argument("--no-notes", action="store_true", help="PPTX: exclude speaker notes")
+    sp.set_defaults(func=cmd_extract)
 
     args = ap.parse_args()
     return args.func(args)

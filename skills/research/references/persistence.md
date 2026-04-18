@@ -76,6 +76,38 @@ verification:                           # populated by research.py verify (v0.2+
 
 **Required fields:** slug, title, topics, projects, status, created, reviewed, sources. Everything else defaults.
 
+## Extraction — which tool for which source
+
+Phase 2-3 research populates the `## Raw` section. Pick the right extractor per source type:
+
+| Source | Tool | Why |
+|---|---|---|
+| HTML page (URL) | `WebFetch` | Built-in, returns markdown |
+| Short PDF (≤10 pages, simple text) | `Read` with `pages` param | Built-in, fast, no deps |
+| Any PDF (long, tables, scanned text) | `/research:extract <path>` | Routes to `@tyroneross/omniparse` |
+| Excel (`.xlsx`, `.xls`, `.csv`, `.tsv`, `.ods`, `.xlsb`) | `/research:extract <path>` | Omniparse; `--sheet NAME` to pick one |
+| PowerPoint (`.pptx`) | `/research:extract <path>` | Omniparse; `--no-notes` to strip speaker notes |
+| Python source (`.py`) | `/research:extract <path>` | Omniparse — AST-level structured markdown |
+| Whole docs directory | `/research:extract <dir> -r` | Omniparse recursive walk |
+| Markdown / plain text / JSON / YAML | `Read` | Stdlib covers it; `/research:extract` rejects these |
+
+### Omniparse
+
+`/research:extract` routes everything through `@tyroneross/omniparse` — a user-authored Node.js CLI (MIT) that ships with the local monorepo at `~/Desktop/git-folder/Omniparse/`. No external Python extraction libraries are used. PDF handling is basic text extraction (no table or formula recognition). If academic PDF fidelity ever blocks real work, the right fix is to extend Omniparse rather than add another dependency.
+
+Omniparse binary resolution (in order):
+1. `omniparse` on `PATH` (global install).
+2. Built dist at `~/Desktop/git-folder/Omniparse/packages/sdk/dist/bin/omniparse.js` via `node`.
+3. `npx --prefix ~/Desktop/git-folder/Omniparse omniparse`.
+
+If none resolve, the command prints a build hint: `cd ~/Desktop/git-folder/Omniparse && npm install && npm run build`.
+
+### Caching
+
+Every successful extract is cached at `~/research/.extract-cache/<sha256>-<flags>.md`. The cache key combines the file's SHA-256 (or a directory-listing hash for directories) with the active flag signature (`-f`, `-r`, `--sheet`, `--no-notes`). Re-reading the same file with the same flags is instant. Use `--no-cache` to force re-extract. Safe to delete the cache dir at any time.
+
+Guiding rule: **non-LLM parsers do extraction, Claude does synthesis.** Paste the markdown verbatim into `## Raw`, under a heading with the source path + capture date. The verifier chunks this later.
+
 ## Three-layer template
 
 ```markdown
