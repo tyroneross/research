@@ -359,117 +359,232 @@ def _summary_from_tldr(tldr: str, limit: int = 120) -> str:
     return text[: limit - 1].rstrip() + "\u2026"
 
 
-def _project_research_dir(project_path: Path) -> Path:
-    """Return <project>/research/ (visible, committed)."""
-    return project_path / "research"
+def _managed_projects_dir() -> Path:
+    """Return ~/research/projects/ — the central symlink home for plugin-managed projects."""
+    return BASE_DIR / "projects"
 
 
-def _project_live_dir(project_path: Path) -> Path:
-    """Return <project>/research/.live/ (gitignored, holds symlinks to canonical)."""
-    return _project_research_dir(project_path) / ".live"
+def _linked_projects_registry_path() -> Path:
+    """Return ~/research/.linked-projects.json — registration file for link-project."""
+    return BASE_DIR / ".linked-projects.json"
 
 
-def _migrate_legacy_research(project_path: Path) -> int:
-    """If <project>/.research/ exists (v0.2 layout), migrate to <project>/research/.live/.
-
-    Returns number of entries migrated (0 if nothing to do). Idempotent and safe.
-    """
-    legacy = project_path / ".research"
-    if not legacy.exists() or not legacy.is_dir():
-        return 0
-    new_root = _project_research_dir(project_path)
-    new_live = _project_live_dir(project_path)
-    new_live.mkdir(parents=True, exist_ok=True)
-    moved = 0
-    # Move every symlink/file in legacy to new_live, preserving link target
-    for child in list(legacy.iterdir()):
-        if child.name == "INDEX.md":
-            # Old auto-generated index; safe to drop (replaced by RossLabs-Research.md)
-            try:
-                child.unlink()
-            except OSError:
-                pass
-            continue
-        dest = new_live / child.name
-        if dest.exists() or dest.is_symlink():
-            # Already migrated; remove legacy duplicate
-            try:
-                if child.is_symlink() or child.is_file():
-                    child.unlink()
-            except OSError:
-                pass
-            continue
-        if child.is_symlink():
-            target = os.readlink(child)
-            os.symlink(target, dest)
-            child.unlink()
-            moved += 1
-        elif child.is_file():
-            shutil.move(str(child), str(dest))
-            moved += 1
-    # Try to remove legacy dir if empty
+def _read_linked_projects_registry() -> dict:
+    """Load the linked-projects registry as a dict. Returns {} if absent or malformed."""
+    p = _linked_projects_registry_path()
+    if not p.exists():
+        return {}
     try:
-        legacy.rmdir()
-    except OSError:
-        pass  # Not empty; leave it
-    if moved:
-        print(f"Migrated {project_path.name}/.research/ -> research/ ({moved} entries)")
-    return moved
+        return json.loads(p.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
 
 
-def _project_entry_paths(project_path: Path, slug: str, canonical: Path) -> tuple[Path, Path]:
-    """Return (real_copy_path, live_symlink_path) for a slug under the project."""
-    top = top_level_topic(slug)
-    real_copy = _project_research_dir(project_path) / top / canonical.name
-    live_link = _project_live_dir(project_path) / canonical.name
-    return real_copy, live_link
+def _write_linked_projects_registry(registry: dict) -> None:
+    """Write the registry deterministically (sorted keys, stable output)."""
+    p = _linked_projects_registry_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(registry, indent=2, sort_keys=True) + "\n")
 
 
-def _ensure_project_gitignore(project_path: Path) -> None:
-    """Append `research/.live/` to project .gitignore if a .gitignore exists and rule is missing."""
-    gi = project_path / ".gitignore"
-    if not gi.exists():
-        return
-    text = gi.read_text()
-    rule = "research/.live/"
-    # Tolerate trailing slash variations
-    lines = [ln.rstrip() for ln in text.splitlines()]
-    if rule in lines or rule.rstrip("/") in lines or "research/.live" in lines:
-        return
-    suffix = "" if text.endswith("\n") else "\n"
-    gi.write_text(text + suffix + "# research plugin: live symlinks to ~/research/\n" + rule + "\n")
+_V030_ARTIFACT_NOTE_SHOWN: set[str] = set()
 
 
-def _write_project_copy_and_link(project_path: Path, canonical: Path, fm: dict) -> tuple[Path, Path]:
-    """Write the deterministic real-file copy and the .live symlink for one entry.
+def _note_v030_artifacts(project_path: Path) -> None:
+    """Print a one-time informational note if v0.3.0 artifacts are present in a project.
 
-    Returns (real_copy_path, live_link_path). Idempotent.
+    v0.3.1 does not maintain these, but also does not delete them.
     """
-    slug = fm["slug"]
-    real_copy, live_link = _project_entry_paths(project_path, slug, canonical)
-    real_copy.parent.mkdir(parents=True, exist_ok=True)
-    live_link.parent.mkdir(parents=True, exist_ok=True)
-    # Real copy: full canonical content, deterministic
-    real_copy.write_text(canonical.read_text())
-    # Symlink (replace if stale)
-    if live_link.exists() or live_link.is_symlink():
+    name = project_path.name
+    if name in _V030_ARTIFACT_NOTE_SHOWN:
+        return
+    artifacts = []
+    legacy_research_dir = project_path / "research"
+    legacy_live = legacy_research_dir / ".live"
+    legacy_index = project_path / "RossLabs-Research.md"
+    if legacy_live.exists() and legacy_live.is_dir():
+        artifacts.append(f"{legacy_live} (v0.3.0 live symlinks)")
+    if legacy_research_dir.exists() and legacy_research_dir.is_dir():
+        # Only flag if it looks plugin-authored (has topic subdirs matching slug tops)
+        has_topic_child = any(
+            (legacy_research_dir / c.name).is_dir() and c.name != ".live"
+            for c in legacy_research_dir.iterdir()
+        ) if legacy_research_dir.exists() else False
+        if has_topic_child:
+            artifacts.append(f"{legacy_research_dir} (v0.3.0 file copies)")
+    if legacy_index.exists():
+        artifacts.append(f"{legacy_index} (v0.3.0 project index)")
+    if artifacts:
+        print(
+            f"Note: {name}/ contains v0.3.0 artifacts that v0.3.1 no longer maintains:",
+            file=sys.stderr,
+        )
+        for a in artifacts:
+            print(f"  - {a}", file=sys.stderr)
+        print(
+            "  These are preserved as-is. Remove manually if unwanted.",
+            file=sys.stderr,
+        )
+    _V030_ARTIFACT_NOTE_SHOWN.add(name)
+
+
+def _managed_symlink_path(project_name: str, canonical: Path) -> Path:
+    """Return ~/research/projects/<project_name>/<slug>.md — the central symlink target."""
+    return _managed_projects_dir() / project_name / canonical.name
+
+
+def _write_managed_symlink(project_name: str, canonical: Path) -> Path:
+    """Create or refresh a symlink at ~/research/projects/<name>/<slug>.md -> canonical.
+
+    Idempotent. Returns the symlink path.
+    """
+    link = _managed_symlink_path(project_name, canonical)
+    link.parent.mkdir(parents=True, exist_ok=True)
+    if link.exists() or link.is_symlink():
         try:
-            live_link.unlink()
+            link.unlink()
         except OSError:
             pass
     try:
-        live_link.symlink_to(canonical)
+        link.symlink_to(canonical)
     except OSError as e:
-        print(f"WARN: could not create symlink {live_link}: {e}", file=sys.stderr)
-    _ensure_project_gitignore(project_path)
-    return real_copy, live_link
+        print(f"WARN: could not create symlink {link}: {e}", file=sys.stderr)
+    return link
 
 
-def _append_project_index(project_path: Path, entry_path: Path, fm: dict) -> None:
-    """Back-compat shim used by `link`. Routes through new copy+symlink+index regen flow."""
-    _migrate_legacy_research(project_path)
-    _write_project_copy_and_link(project_path, entry_path, fm)
-    _rebuild_project_research_md(project_path)
+def _extract_title_and_summary(path: Path) -> tuple[str, str]:
+    """Extract (title, 1-line-summary) from a markdown file deterministically.
+
+    Title: first '# H1' line text. Fallback to filename stem if no H1.
+    Summary: first non-empty, non-heading paragraph, first sentence, truncated ~120 chars.
+    Zero LLM calls. Frontmatter (if present) is skipped.
+    """
+    try:
+        text = path.read_text(errors="replace")
+    except OSError:
+        return path.stem, ""
+
+    # Strip YAML frontmatter if present
+    body = text
+    if text.startswith("---\n"):
+        end = text.find("\n---\n", 4)
+        if end != -1:
+            body = text[end + 5 :]
+        else:
+            end = text.find("\n---", 4)
+            if end != -1:
+                body = text[end + 4 :]
+
+    lines = body.splitlines()
+    title: str | None = None
+    for ln in lines:
+        stripped = ln.strip()
+        if stripped.startswith("# ") and not stripped.startswith("## "):
+            title = stripped[2:].strip()
+            break
+    if not title:
+        title = path.stem.replace("-", " ").replace("_", " ").strip() or path.name
+
+    # First paragraph: collect consecutive non-empty, non-heading lines after any H1
+    summary_lines: list[str] = []
+    in_paragraph = False
+    seen_h1 = False
+    hr_pat = re.compile(r"^([-*_])\1{2,}$")
+    for ln in lines:
+        stripped = ln.strip()
+        is_heading = stripped.startswith("#")
+        is_hr = bool(hr_pat.match(stripped))
+        if is_heading or is_hr:
+            if not seen_h1 and stripped.startswith("# "):
+                seen_h1 = True
+                continue
+            if in_paragraph:
+                break
+            # Skip subsequent headings / horizontal rules until content starts
+            continue
+        if not stripped:
+            if in_paragraph:
+                break
+            continue
+        # Skip list markers, block quotes, table rows, code fences
+        if stripped.startswith(("```", "|", "- ", "* ", "> ")) and not summary_lines:
+            continue
+        summary_lines.append(stripped)
+        in_paragraph = True
+
+    summary = " ".join(summary_lines)
+    # First sentence, naive: cut at first ". " followed by capital or end
+    m = re.search(r"([^.!?]+[.!?])(?:\s|$)", summary)
+    if m:
+        summary = m.group(1).strip()
+    summary = re.sub(r"\s+", " ", summary).strip()
+    # Strip simple markdown emphasis
+    summary = re.sub(r"\*\*([^*]+)\*\*", r"\1", summary)
+    summary = re.sub(r"\*([^*]+)\*", r"\1", summary)
+    summary = re.sub(r"`([^`]+)`", r"\1", summary)
+    if len(summary) > 120:
+        summary = summary[:117].rstrip() + "..."
+    return title, summary
+
+
+def _scan_linked_project_files(source_dir: Path) -> list[dict]:
+    """Walk source_dir recursively for *.md files. Return [{name,title,summary,mtime,size}]."""
+    files: list[dict] = []
+    for md in sorted(source_dir.rglob("*.md")):
+        if not md.is_file():
+            continue
+        try:
+            stat = md.stat()
+        except OSError:
+            continue
+        title, summary = _extract_title_and_summary(md)
+        files.append({
+            "name": md.name,
+            "relpath": str(md.relative_to(source_dir)),
+            "title": title,
+            "summary": summary,
+            "mtime": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+            "size": stat.st_size,
+            "abspath": str(md),
+        })
+    return files
+
+
+def _refresh_linked_project_symlinks(project_name: str, files: list[dict]) -> list[Path]:
+    """Refresh ~/research/projects/<name>/ symlinks for a linked external project.
+
+    Keeps one symlink per unique filename (collisions within one project resolve to last-seen).
+    Wipes stale links that no longer appear in `files`. Returns list of link paths created.
+    """
+    link_dir = _managed_projects_dir() / project_name
+    link_dir.mkdir(parents=True, exist_ok=True)
+    desired: dict[str, str] = {}  # name -> abspath
+    for f in files:
+        desired[f["name"]] = f["abspath"]
+    # Remove any existing symlinks not in desired
+    existing = {c.name for c in link_dir.iterdir()} if link_dir.exists() else set()
+    for stale_name in existing - set(desired.keys()):
+        stale = link_dir / stale_name
+        if stale.is_symlink() or stale.is_file():
+            try:
+                stale.unlink()
+            except OSError:
+                pass
+    # Create / refresh
+    out: list[Path] = []
+    for name, target in desired.items():
+        link = link_dir / name
+        if link.is_symlink() or link.exists():
+            try:
+                link.unlink()
+            except OSError:
+                pass
+        try:
+            link.symlink_to(target)
+            out.append(link)
+        except OSError as e:
+            print(f"WARN: could not symlink {link} -> {target}: {e}", file=sys.stderr)
+    return out
 
 
 def cmd_save(args: argparse.Namespace) -> int:
@@ -583,35 +698,34 @@ def cmd_save(args: argparse.Namespace) -> int:
     conn.commit()
     conn.close()
 
-    # Project copy + symlink + per-project index
-    project_outputs: list[tuple[str, Path, Path]] = []  # (project_name, real_copy, live_link)
+    # v0.3.1: plugin-managed projects get ONE symlink at ~/research/projects/<name>/<slug>.md.
+    # No file copies. No writes into the project directory (unless --with-project-index).
+    project_outputs: list[tuple[str, Path]] = []  # (project_name, managed_symlink_path)
+    with_project_index = bool(getattr(args, "with_project_index", False))
     if not args.skip_symlink:
         for proj in fm.get("projects", []):
-            proj_dir = GIT_FOLDER / proj
-            if not (proj_dir.exists() and proj_dir.is_dir()):
-                continue
-            # Migrate v0.2 layout if needed (idempotent)
-            _migrate_legacy_research(proj_dir)
-            real_copy, live_link = _write_project_copy_and_link(proj_dir, canonical, fm)
-            project_outputs.append((proj, real_copy, live_link))
+            managed_link = _write_managed_symlink(proj, canonical)
+            project_outputs.append((proj, managed_link))
+            # Opt-in: also regenerate <project>/RossLabs-Research.md
+            if with_project_index:
+                proj_dir = GIT_FOLDER / proj
+                if proj_dir.exists() and proj_dir.is_dir():
+                    _note_v030_artifacts(proj_dir)
+                    _rebuild_project_research_md(proj_dir)
 
-    # Rebuild indexes (canonical + per-project + portfolio) unless explicitly skipped
+    # Rebuild indexes (canonical + portfolio) unless explicitly skipped
     skip_index = bool(args.skip_index or getattr(args, "no_index", False))
     if not skip_index:
         _rebuild_indexes()
-        for proj, _, _ in project_outputs:
-            proj_dir = GIT_FOLDER / proj
-            _rebuild_project_research_md(proj_dir)
         _rebuild_portfolio()
 
     print(f"Saved: {fm['slug']}")
     print(f"  Canonical: {canonical}")
-    for proj, real_copy, live_link in project_outputs:
+    for proj, managed_link in project_outputs:
         print(f"  Project:  {proj}")
-        print(f"    Copy:     {real_copy}")
-        print(f"    Symlink:  {live_link}")
-        if not skip_index:
-            print(f"    Index:    {GIT_FOLDER / proj / 'RossLabs-Research.md'}")
+        print(f"    Symlink: {managed_link}")
+        if with_project_index:
+            print(f"    Index:   {GIT_FOLDER / proj / 'RossLabs-Research.md'}")
     if not skip_index:
         print(f"  Portfolio: {BASE_DIR / 'PORTFOLIO.md'}")
     print(f"  Corroboration: {fm.get('corroboration', 0)}  Confidence: {fm.get('confidence')}")
@@ -734,12 +848,79 @@ def cmd_link(args: argparse.Namespace) -> int:
     fm["projects"] = projs
     entry_path.write_text(dump_frontmatter(fm, body))
 
-    # Create symlink + INDEX entry
-    fm_with_preview = dict(fm)
-    fm_with_preview["tldr_preview"] = (row["tldr"] or "").split("\n")[0][:80]
-    _append_project_index(proj_path, entry_path, fm_with_preview)
+    # v0.3.1: managed symlink under ~/research/projects/<name>/<slug>.md
+    managed_link = _write_managed_symlink(project_name, entry_path)
+    _note_v030_artifacts(proj_path)
     conn.close()
-    print(f"Linked {args.slug} -> {proj_path / '.research' / entry_path.name}")
+    print(f"Linked {args.slug} -> {managed_link}")
+    return 0
+
+
+# ---------- link-project (v0.3.1) ----------
+
+def _do_link_project(project_name: str, source_dir: Path) -> dict:
+    """Register an external project research directory, scan it, create symlinks.
+
+    Returns the registry entry dict that was written. Idempotent.
+    """
+    ensure_layout()
+    source_dir = source_dir.resolve()
+    if not source_dir.is_dir():
+        raise ValueError(f"not a directory: {source_dir}")
+
+    files = _scan_linked_project_files(source_dir)
+    # Refresh symlinks at ~/research/projects/<project_name>/
+    _refresh_linked_project_symlinks(project_name, files)
+
+    # Persist registry entry (without abspath — keep entry lean; can be rebuilt from path)
+    registry = _read_linked_projects_registry()
+    entry = {
+        "path": str(source_dir),
+        "linked": today_iso(),
+        "files": [
+            {k: f[k] for k in ("name", "relpath", "title", "summary", "mtime", "size")}
+            for f in files
+        ],
+    }
+    registry[project_name] = entry
+    _write_linked_projects_registry(registry)
+    return entry
+
+
+def cmd_link_project(args: argparse.Namespace) -> int:
+    """Register an existing project research directory as a linked external source.
+
+    Walks the directory recursively for *.md files, extracts title + 1-line summary,
+    records registration in ~/research/.linked-projects.json, creates symlinks under
+    ~/research/projects/<name>/. Does NOT modify the project directory.
+    """
+    ensure_layout()
+    ensure_db()
+    source = Path(args.path).expanduser()
+    if not source.is_absolute():
+        source = (Path.cwd() / source).resolve()
+    if not source.exists():
+        print(f"ERROR: path not found: {source}", file=sys.stderr)
+        return 2
+    if not source.is_dir():
+        print(f"ERROR: not a directory: {source}", file=sys.stderr)
+        return 2
+    try:
+        entry = _do_link_project(args.name, source)
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+
+    # Rebuild portfolio so the linked project shows up
+    if not getattr(args, "no_index", False):
+        _rebuild_portfolio()
+
+    link_dir = _managed_projects_dir() / args.name
+    print(f"Linked project: {args.name}")
+    print(f"  Source:   {entry['path']}")
+    print(f"  Files:    {len(entry['files'])}")
+    print(f"  Symlinks: {link_dir}/")
+    print(f"  Registry: {_linked_projects_registry_path()}")
     return 0
 
 
@@ -766,17 +947,10 @@ def _rebuild_project_research_md(project_path: Path) -> Path | None:
             r["topics"] = json.loads(r["topics"] or "[]")
             r["tags"] = json.loads(r["tags"] or "[]")
             matched.append(r)
-    research_dir = _project_research_dir(project_path)
     index_md = project_path / "RossLabs-Research.md"
     if not matched:
-        # No entries; remove stale index if present, leave the dir alone.
-        if index_md.exists():
-            try:
-                index_md.unlink()
-            except OSError:
-                pass
+        # No entries; leave any pre-existing index alone (may be from v0.3.0; user choice to keep/remove).
         return None
-    research_dir.mkdir(parents=True, exist_ok=True)
     # Group by top-level topic from slug
     by_top: dict[str, list[dict]] = {}
     for r in matched:
@@ -791,14 +965,12 @@ def _rebuild_project_research_md(project_path: Path) -> Path | None:
     for top in sorted(by_top):
         lines.append(f"### {top}\n")
         for r in sorted(by_top[top], key=lambda x: x["slug"]):
-            rel_md = f"research/{top}/{Path(r['path']).name}"
-            tier = ""
-            # First T1/T2 tag if present in tags or sources tier (best effort)
-            # Use confidence + status as proxies the user spec asked for
+            # v0.3.1: link to canonical file under ~/research/ (no project file copies).
+            canonical_path = Path(r["path"])
             confidence = r.get("confidence", "inferred") or "inferred"
             status = r.get("status", "evergreen") or "evergreen"
             summary = _summary_from_tldr(r.get("tldr") or "")
-            head = f"- [{r['title']}]({rel_md}) \u2014 reviewed {r['reviewed']}, {confidence}, {status}\n"
+            head = f"- [{r['title']}]({canonical_path}) \u2014 reviewed {r['reviewed']}, {confidence}, {status}\n"
             lines.append(head)
             if summary:
                 lines.append(f"  > {summary}\n")
@@ -828,7 +1000,7 @@ def _rebuild_project_research_md(project_path: Path) -> Path | None:
 
 
 def _rebuild_portfolio() -> Path:
-    """Regenerate ~/research/PORTFOLIO.md across all projects + cross-cutting topics."""
+    """Regenerate ~/research/PORTFOLIO.md with plugin-managed, linked, and cross-cutting sections."""
     ensure_db()
     conn = db_connect()
     rows = [dict(r) for r in conn.execute(
@@ -848,24 +1020,59 @@ def _rebuild_portfolio() -> Path:
             for p in projs:
                 by_project.setdefault(p, []).append(r)
 
+    registry = _read_linked_projects_registry()
+
     lines: list[str] = []
     lines.append("# Research Portfolio\n\n")
     lines.append(f"_Auto-generated. Updated: {today_iso()}_\n\n")
-    lines.append("## By Project\n\n")
+
+    # --- Plugin-managed projects ---
+    lines.append("## Plugin-managed projects\n\n")
+    lines.append("_Entries saved through `/research:save` with a `projects:` tag. "
+                 "Symlinks live at `~/research/projects/<name>/`._\n\n")
     if not by_project:
         lines.append("_No project-tagged entries yet._\n\n")
     for proj in sorted(by_project):
         entries = by_project[proj]
         last_reviewed = max((e.get("reviewed") or "") for e in entries) or "unknown"
         topics_set = sorted({top_level_topic(e["slug"]) for e in entries})
-        proj_path = GIT_FOLDER / proj
+        symlink_dir = _managed_projects_dir() / proj
         lines.append(f"### {proj}\n")
         lines.append(f"- {len(entries)} entries, last updated {last_reviewed}\n")
         lines.append(f"- Topics: {', '.join(topics_set)}\n")
-        lines.append(f"- Path: {proj_path}/research/\n")
-        lines.append(f"- Project index: {proj_path}/RossLabs-Research.md\n\n")
+        lines.append(f"- Symlink dir: {symlink_dir}/\n")
+        tops = sorted({top_level_topic(e["slug"]) for e in entries})
+        for top in tops:
+            lines.append(f"- Central entries: ~/research/topics/{top}/\n")
+        lines.append("\n")
 
-    lines.append("## Cross-cutting (no project assignment)\n\n")
+    # --- Linked external research directories ---
+    lines.append("## Linked external research directories\n\n")
+    lines.append("_Registered via `/research:link-project`. The plugin does not own "
+                 "or modify these files; it only reads, summarizes, and links them._\n\n")
+    if not registry:
+        lines.append("_None registered yet._\n\n")
+    for name in sorted(registry):
+        entry = registry[name]
+        files = entry.get("files", [])
+        lines.append(f"### {name}\n")
+        lines.append(f"- Source: {entry.get('path', '?')}\n")
+        lines.append(f"- {len(files)} files, last linked {entry.get('linked', '?')}\n")
+        if files:
+            lines.append("- Files:\n")
+            for f in sorted(files, key=lambda x: x.get("relpath") or x.get("name", "")):
+                relpath = f.get("relpath") or f.get("name", "")
+                title = f.get("title") or f.get("name", "")
+                summary = f.get("summary") or ""
+                line = f"  - {relpath} \u2014 {title}"
+                if summary:
+                    line += f" \u2014 {summary}"
+                lines.append(line + "\n")
+        lines.append("\n")
+
+    # --- Cross-cutting (unchanged) ---
+    lines.append("## Cross-cutting\n\n")
+    lines.append("_Entries without a `projects:` tag._\n\n")
     if not cross_cutting:
         lines.append("_None._\n\n")
     else:
@@ -1003,27 +1210,63 @@ def cmd_index(args: argparse.Namespace) -> int:
     ensure_layout()
     ensure_db()
     _rebuild_indexes()
-    # Rebuild every project's RossLabs-Research.md based on current DB
+
+    # v0.3.1: refresh plugin-managed symlinks at ~/research/projects/<name>/<slug>.md
+    # from current DB state (covers cases where slugs were renamed or projects re-tagged).
     conn = db_connect()
     rows = conn.execute(
-        "SELECT projects FROM entries WHERE status != 'archived'"
+        "SELECT slug, path, projects FROM entries WHERE status != 'archived'"
     ).fetchall()
     conn.close()
-    project_names: set[str] = set()
+    managed_by_project: dict[str, set[str]] = {}
     for row in rows:
+        canonical = Path(row["path"])
         for p in json.loads(row["projects"] or "[]"):
-            project_names.add(p)
-    rebuilt = 0
-    for p in sorted(project_names):
-        proj_dir = GIT_FOLDER / p
-        if proj_dir.exists() and proj_dir.is_dir():
-            _migrate_legacy_research(proj_dir)
-            _rebuild_project_research_md(proj_dir)
-            rebuilt += 1
+            _write_managed_symlink(p, canonical)
+            managed_by_project.setdefault(p, set()).add(canonical.name)
+    # Prune stale managed symlinks that no longer correspond to a DB entry
+    projects_root = _managed_projects_dir()
+    pruned = 0
+    if projects_root.exists():
+        linked_names = set(_read_linked_projects_registry().keys())
+        for proj_dir in projects_root.iterdir():
+            if not proj_dir.is_dir():
+                continue
+            if proj_dir.name in linked_names:
+                # Handled by link-project rescan below
+                continue
+            desired = managed_by_project.get(proj_dir.name, set())
+            for child in proj_dir.iterdir():
+                if child.is_symlink() and child.name not in desired:
+                    try:
+                        child.unlink()
+                        pruned += 1
+                    except OSError:
+                        pass
+
+    # v0.3.1: re-scan every registered linked-external project and refresh its symlinks.
+    registry = _read_linked_projects_registry()
+    rescanned = 0
+    missing: list[str] = []
+    for name, entry in list(registry.items()):
+        src = Path(entry.get("path", ""))
+        if not src.is_dir():
+            missing.append(f"{name} ({src})")
+            continue
+        _do_link_project(name, src)
+        rescanned += 1
     portfolio = _rebuild_portfolio()
+
     print("Indexes rebuilt.")
-    print(f"  Per-project: {rebuilt} updated")
-    print(f"  Portfolio:   {portfolio}")
+    print(f"  Managed project symlinks: {sum(len(v) for v in managed_by_project.values())} across {len(managed_by_project)} project(s)")
+    if pruned:
+        print(f"  Pruned stale symlinks:    {pruned}")
+    print(f"  Linked external projects: {rescanned} rescanned")
+    if missing:
+        print(f"  Missing sources:          {len(missing)}")
+        for m in missing:
+            print(f"    - {m}")
+    print(f"  Portfolio:                {portfolio}")
     return 0
 
 
@@ -2103,6 +2346,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                 skip_symlink = False
                 skip_index = False
                 no_index = False
+                with_project_index = False
             cmd_save(_A())  # type: ignore[arg-type]
             saved += 1
         print(f"\nSaved {saved} draft(s).")
@@ -2126,7 +2370,12 @@ def main() -> int:
     sp.add_argument("--move-source", action="store_true", help="Delete source file after copy to canonical path")
     sp.add_argument("--skip-symlink", action="store_true", help="Do not create project copy/symlink (used by hook)")
     sp.add_argument("--skip-index", action="store_true", help="Do not rebuild any indexes (legacy alias of --no-index)")
-    sp.add_argument("--no-index", action="store_true", help="Skip RossLabs-Research.md and PORTFOLIO.md regen on this save")
+    sp.add_argument("--no-index", action="store_true", help="Skip per-project index + PORTFOLIO.md regen on this save")
+    sp.add_argument(
+        "--with-project-index",
+        action="store_true",
+        help="Opt-in: also regenerate <project>/RossLabs-Research.md (writes into the project dir)",
+    )
     sp.set_defaults(func=cmd_save)
 
     sp = sub.add_parser("search", help="Full-text search (FTS5 + BM25)")
@@ -2149,6 +2398,16 @@ def main() -> int:
     sp.add_argument("slug")
     sp.add_argument("project_path", nargs="?", help="Defaults to cwd")
     sp.set_defaults(func=cmd_link)
+
+    sp = sub.add_parser(
+        "link-project",
+        help="Register an existing project research directory (v0.3.1). "
+        "Walks recursively, extracts title+summary, symlinks into ~/research/projects/<name>/.",
+    )
+    sp.add_argument("name", help="Short project name used for the symlink dir and registry key")
+    sp.add_argument("--path", required=True, help="Absolute path to the research directory to link")
+    sp.add_argument("--no-index", action="store_true", help="Skip PORTFOLIO.md regen on this call")
+    sp.set_defaults(func=cmd_link_project)
 
     sp = sub.add_parser("index", help="Rebuild markdown indexes + MOCs")
     sp.set_defaults(func=cmd_index)

@@ -12,7 +12,7 @@ Central, token-efficient research knowledge base. Persists findings to `~/resear
 
 ## Entry point
 
-- Slash commands: `/research:init`, `/research:save`, `/research:search`, `/research:list`, `/research:link`, `/research:index`, `/research:archive`, `/research:score`, `/research:verify`, `/research:review`, `/research:compress`, `/research:extract`
+- Slash commands: `/research:init`, `/research:save`, `/research:search`, `/research:list`, `/research:link`, `/research:link-project`, `/research:index`, `/research:archive`, `/research:score`, `/research:verify`, `/research:review`, `/research:compress`, `/research:extract`, `/research:ingest`, `/research:recategorize`
 - Direct: `python ${CLAUDE_PLUGIN_ROOT}/research.py <subcommand>`
 - Via skill: user language matching the `research` skill's description triggers the full-flow, which ends by persisting via Phase 6.
 
@@ -23,12 +23,19 @@ Central, token-efficient research knowledge base. Persists findings to `~/resear
 3. **Phase 6**: Claude writes a three-layer markdown entry (TL;DR / Notes / Raw) with rich frontmatter, then invokes `research.py save` which:
    - upserts into SQLite,
    - writes the canonical entry to `~/research/topics/<top>/<slug>.md`,
-   - for each project in `projects:`, writes a real-file copy to `<project>/research/<top>/<slug>.md` (visible, gets committed) AND maintains a symlink at `<project>/research/.live/<slug>.md` pointing to the canonical entry,
-   - regenerates `<project>/RossLabs-Research.md` (auto-generated index per project),
+   - for each project in `projects:`, maintains a symlink at `~/research/projects/<project-name>/<slug>.md` pointing to the canonical entry (link-only; no writes into the project directory),
    - regenerates `~/research/PORTFOLIO.md` (master corpus index across all projects),
    - triggers index rebuild for the central indexes via hook.
 
-Pass `--no-index` to defer per-project and portfolio regen on a single save (run `/research:index` to flush). Legacy `<project>/.research/` symlink directories from v0.2 are migrated to `<project>/research/.live/` on first save.
+Pass `--no-index` to defer portfolio regen on a single save (run `/research:index` to flush). Pass `--with-project-index` to opt in to writing `<project>/RossLabs-Research.md` inside the project (default is to leave the project untouched).
+
+## Linking existing project research
+
+For project directories that already contain research markdown files the plugin did not author (for example `~/Desktop/git-folder/SpeakSavvy-iOS/docs/research/`), use `/research:link-project <name> <path>`. The plugin walks the directory recursively for `*.md` files, extracts a title (first `# H1`) and a 1-line summary (first paragraph, first sentence, truncated to 120 chars) from each, records the registration in `~/research/.linked-projects.json`, and creates symlinks at `~/research/projects/<name>/<filename>`. The source directory is never modified. Re-running the command refreshes the registration and symlinks (idempotent); `/research:index` also re-scans every registered linked project.
+
+The portfolio has two project sections: "Plugin-managed projects" (from save's `projects:` tag) and "Linked external research directories" (from link-project). Cross-cutting entries (no project tag) appear below.
+
+Legacy v0.3.0 artifacts — `<project>/research/` file copies, `<project>/research/.live/` symlinks, and `<project>/RossLabs-Research.md` — are preserved as-is. v0.3.1 no longer writes to these paths by default, but also never deletes them. A one-time informational note is printed when the plugin touches a project with such artifacts.
 
 ## Dependencies
 

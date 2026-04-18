@@ -25,16 +25,27 @@ How research gets saved into the central knowledge base at `~/research/`.
   inbox/                        # unrefined fleeting notes; populated by /research:ingest --inbox
 ```
 
-Per project (when entry frontmatter has `projects: [foo]` and `~/Desktop/git-folder/foo/` exists):
+Plugin-managed projects (entries saved with `projects: [foo]` frontmatter) get a single symlink in the central data store:
 
 ```
-<project>/
-  research/
-    <top>/<slug>.md             # AUTO (v0.3): real-file copy, visible, committed
-    .live/<slug>.md             # AUTO: symlink to ~/research/topics/<top>/<slug>.md (gitignored)
-  RossLabs-Research.md          # AUTO (v0.3): per-project index of all linked entries
-  .gitignore                    # auto-amended to include `research/.live/`
+~/research/projects/
+  <project-name>/
+    <slug>.md                   # symlink -> ~/research/topics/<top>/<slug>.md
 ```
+
+No files are written into the project directory by default. Pass `--with-project-index` to `/research:save` if you also want `<project>/RossLabs-Research.md` written (opt-in).
+
+Linked external directories (registered via `/research:link-project <name> <path>`) are tracked in a registry:
+
+```
+~/research/
+  .linked-projects.json         # {"<name>": {"path", "linked", "files": [{name, relpath, title, summary, mtime, size}]}}
+  projects/
+    <name>/
+      <filename>.md             # symlinks to files inside the registered source dir
+```
+
+The source directory is never modified. `/research:index` re-scans every registered linked project, refreshing file lists and symlinks.
 
 ## Slug rules
 
@@ -146,19 +157,42 @@ Verbatim extracts. One section per source:
 
 The Raw layer is what FTS5 indexes for retrieval and what the v0.2 verifier chunks.
 
-## Project association (v0.3)
+## Project association (v0.3.1)
 
-When `projects[]` is non-empty and a project directory exists at `~/Desktop/git-folder/<name>/`, `research.py save` does three things:
+When `projects[]` is non-empty, `research.py save` maintains one symlink per project in the central data store:
 
-1. **Real-file copy**: writes `<project>/research/<top>/<slug>.md` with the full canonical content (frontmatter + body). Visible, gets committed with the project. Travels with the repo.
-2. **Live symlink**: creates `<project>/research/.live/<slug>.md` → `~/research/topics/<top>/<slug>.md`. Lets you follow updates from the central corpus. Auto-added to project `.gitignore` if one exists.
-3. **Project index**: regenerates `<project>/RossLabs-Research.md` — auto-generated, do-not-edit list grouped by top-level topic, with title, link, last reviewed, confidence, and a 1-line summary extracted from each entry's TL;DR.
+- `~/research/projects/<project-name>/<slug>.md` → `~/research/topics/<top>/<slug>.md`
 
-Master view: `~/research/PORTFOLIO.md` is regenerated alongside, summarizing every project (entries / topics / paths) plus cross-cutting topics.
+That is the only side-effect by default. The project directory itself is not touched. The project need not even exist at `~/Desktop/git-folder/<name>/` — the symlink is keyed by project name, not file system location.
 
-`--no-index` defers the per-project and portfolio regen on a single save (useful for batches). `/research:index` flushes everything.
+**Opt-in project index**: pass `--with-project-index` to also regenerate `<project>/RossLabs-Research.md` inside the project directory. Useful when you want the research surfaced to anyone browsing the repo (for example, humans reviewing a PR). Off by default so saves stay non-invasive.
 
-**Migration from v0.2**: any project with the old `<project>/.research/` directory is silently migrated to `<project>/research/.live/` on first save. Idempotent.
+**Master view**: `~/research/PORTFOLIO.md` is regenerated on every save (unless `--no-index`) with a dedicated "Plugin-managed projects" section.
+
+## Linked external directories (v0.3.1)
+
+Some projects already have research directories the plugin did not author (for example `~/Desktop/git-folder/SpeakSavvy-iOS/docs/research/` with 17 markdown files in flat/plain format). Copying them into the plugin's layout would be destructive; instead, register them.
+
+```
+python research.py link-project speaksavvy --path ~/Desktop/git-folder/SpeakSavvy-iOS/docs/research/
+# or: /research:link-project speaksavvy ~/Desktop/git-folder/SpeakSavvy-iOS/docs/research/
+```
+
+What happens:
+
+1. Walks the source directory recursively for `*.md` files.
+2. For each file, extracts a title (first `# H1`, or filename stem) and a 1-line summary (first paragraph, first sentence, truncated to ~120 chars). Pure deterministic — no LLM calls.
+3. Records the registration in `~/research/.linked-projects.json` as `{<name>: {path, linked, files: [{name, relpath, title, summary, mtime, size}]}}`.
+4. Creates symlinks at `~/research/projects/<name>/<filename>` pointing to the real files.
+5. Appends a "Linked external research directories" section to `~/research/PORTFOLIO.md`.
+
+The source directory is never modified. Re-running the command refreshes the registration and symlinks; `/research:index` also re-scans every registered linked project (detects new files, removes deleted ones, refreshes summaries).
+
+Use link-project whenever the research predates the plugin or lives in a deliberate non-plugin layout; use save + `projects:` when the plugin authored the entry and you want it associated.
+
+## Legacy v0.3.0 artifacts
+
+If a project contains `<project>/research/` file copies, `<project>/research/.live/` symlinks, or `<project>/RossLabs-Research.md` from v0.3.0, those are preserved as-is. v0.3.1 does not write to these paths by default, but also does not delete them. A one-time informational note is printed when the plugin touches a project with such artifacts, listing what's there so the user can choose to clean them up manually.
 
 ## Update vs create
 

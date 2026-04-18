@@ -37,27 +37,28 @@ python ~/.claude/plugins/research/research.py init
 
 ## Per-project research
 
-When an entry's frontmatter includes `projects: [foo]` and `~/Desktop/git-folder/foo/` exists:
+Two mechanisms, depending on who authored the research.
 
-- `<project>/research/<top>/<slug>.md` — real-file copy (visible, gets committed with the project)
-- `<project>/research/.live/<slug>.md` — symlink to canonical entry (live-link convenience; `.live/` is auto-added to project's `.gitignore`)
-- `<project>/RossLabs-Research.md` — auto-generated, regenerated on every save (add `--no-index` to defer)
+**Plugin-authored entries** — when an entry's frontmatter includes `projects: [foo]` and a project directory exists, `/research:save` maintains a symlink at `~/research/projects/foo/<slug>.md` pointing to the canonical entry under `~/research/topics/`. The project directory is not modified. Pass `--with-project-index` if you also want a `<project>/RossLabs-Research.md` index file written into the project (opt-in).
 
-The portable real-file copies mean a project's research travels with the repo. The symlinks let you follow live updates from the central corpus.
+**Pre-existing project research** — for directories like `~/Desktop/git-folder/SpeakSavvy-iOS/docs/research/` that predate this plugin and should not be restructured, use `/research:link-project <name> <path>`. The plugin walks the directory recursively for `*.md` files, extracts a title and a 1-line summary from each, records the registration in `~/research/.linked-projects.json`, and creates symlinks at `~/research/projects/<name>/<filename>`. The source directory is never modified.
 
-Existing v0.2 projects with a hidden `<project>/.research/` symlink directory are auto-migrated to the new layout on first save.
+Both mechanisms surface in `~/research/PORTFOLIO.md` under separate sections ("Plugin-managed projects" and "Linked external research directories"). `/research:index` refreshes both.
+
+Legacy v0.3.0 artifacts (`<project>/research/` file copies, `<project>/research/.live/` symlinks, `<project>/RossLabs-Research.md`) are preserved as-is — v0.3.1 does not write to these paths by default, but also does not delete them. A one-time note is printed when the plugin touches a project that still has them.
 
 ## Subcommands
 
 | Command | Purpose |
 |---|---|
 | `/research:init` | Bootstrap `~/research/` layout and DB |
-| `/research:save <file>` | Persist an entry (Phase 6 entry point); writes canonical + project copy + symlink, regenerates indexes |
+| `/research:save <file>` | Persist an entry (Phase 6 entry point); writes canonical + project symlink, regenerates portfolio. `--with-project-index` to also write `<project>/RossLabs-Research.md` |
 | `/research:ingest <path>` | Bulk-ingest existing markdown files; `--inbox` to park, `--save` to persist drafts |
 | `/research:search <query>` | FTS5-ranked search |
 | `/research:list [N]` | Recent entries |
-| `/research:link <slug>` | Retroactive project copy + symlink |
-| `/research:index` | Rebuild central indexes, every project's `RossLabs-Research.md`, and `PORTFOLIO.md` |
+| `/research:link <slug>` | Retroactive project symlink for a saved entry |
+| `/research:link-project <name> <path>` | Register an existing external research directory (plugin does not modify it) |
+| `/research:index` | Rebuild central indexes, refresh plugin-managed symlinks, re-scan linked external projects, and rewrite `PORTFOLIO.md` |
 | `/research:recategorize` | Suggest splits for top-level topics that have grown too large (read-only) |
 | `/research:archive <slug>` | Move to archive, leave redirect stub |
 | `/research:score <url>` | Inspect or set source tier for a domain |
