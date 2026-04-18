@@ -1,7 +1,7 @@
 {
   "name": "research",
-  "version": "0.2.0",
-  "description": "Structured research with central persistence, horizontal topic libraries, deterministic source scoring, claim verification, and lifecycle management. Writes to ~/research/ with project symlinks.",
+  "version": "0.3.0",
+  "description": "Structured research with central persistence, horizontal topic libraries, deterministic source scoring, claim verification, lifecycle management, bulk ingestion, and per-project portable copies + auto-indexes. Writes to ~/research/ with both real-file project copies and live symlinks.",
   "author": {
     "name": "Tyrone Ross"
   },

@@ -20,7 +20,15 @@ Central, token-efficient research knowledge base. Persists findings to `~/resear
 
 1. User asks Claude to research something.
 2. `research` skill runs Phases 1-5 (frame → source → execute → synthesize → deliver) using existing methodology.
-3. **Phase 6 (new)**: Claude writes a three-layer markdown entry (TL;DR / Notes / Raw) with rich frontmatter, then invokes `research.py save` which upserts into SQLite, creates project symlink if applicable, and triggers index rebuild via hook.
+3. **Phase 6**: Claude writes a three-layer markdown entry (TL;DR / Notes / Raw) with rich frontmatter, then invokes `research.py save` which:
+   - upserts into SQLite,
+   - writes the canonical entry to `~/research/topics/<top>/<slug>.md`,
+   - for each project in `projects:`, writes a real-file copy to `<project>/research/<top>/<slug>.md` (visible, gets committed) AND maintains a symlink at `<project>/research/.live/<slug>.md` pointing to the canonical entry,
+   - regenerates `<project>/RossLabs-Research.md` (auto-generated index per project),
+   - regenerates `~/research/PORTFOLIO.md` (master corpus index across all projects),
+   - triggers index rebuild for the central indexes via hook.
+
+Pass `--no-index` to defer per-project and portfolio regen on a single save (run `/research:index` to flush). Legacy `<project>/.research/` symlink directories from v0.2 are migrated to `<project>/research/.live/` on first save.
 
 ## Dependencies
 

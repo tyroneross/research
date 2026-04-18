@@ -343,27 +343,133 @@ def _resolve_collision(slug: str, fm: dict) -> str:
         n += 1
 
 
+def _summary_from_tldr(tldr: str, limit: int = 120) -> str:
+    """Extract a single-line summary from a TL;DR section. First sentence or `limit` chars."""
+    if not tldr:
+        return ""
+    text = " ".join(tldr.strip().split())
+    # First sentence
+    m = re.search(r"^(.+?[.!?])(?:\s|$)", text)
+    if m:
+        sent = m.group(1).strip()
+        if len(sent) <= limit:
+            return sent
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "\u2026"
+
+
+def _project_research_dir(project_path: Path) -> Path:
+    """Return <project>/research/ (visible, committed)."""
+    return project_path / "research"
+
+
+def _project_live_dir(project_path: Path) -> Path:
+    """Return <project>/research/.live/ (gitignored, holds symlinks to canonical)."""
+    return _project_research_dir(project_path) / ".live"
+
+
+def _migrate_legacy_research(project_path: Path) -> int:
+    """If <project>/.research/ exists (v0.2 layout), migrate to <project>/research/.live/.
+
+    Returns number of entries migrated (0 if nothing to do). Idempotent and safe.
+    """
+    legacy = project_path / ".research"
+    if not legacy.exists() or not legacy.is_dir():
+        return 0
+    new_root = _project_research_dir(project_path)
+    new_live = _project_live_dir(project_path)
+    new_live.mkdir(parents=True, exist_ok=True)
+    moved = 0
+    # Move every symlink/file in legacy to new_live, preserving link target
+    for child in list(legacy.iterdir()):
+        if child.name == "INDEX.md":
+            # Old auto-generated index; safe to drop (replaced by RossLabs-Research.md)
+            try:
+                child.unlink()
+            except OSError:
+                pass
+            continue
+        dest = new_live / child.name
+        if dest.exists() or dest.is_symlink():
+            # Already migrated; remove legacy duplicate
+            try:
+                if child.is_symlink() or child.is_file():
+                    child.unlink()
+            except OSError:
+                pass
+            continue
+        if child.is_symlink():
+            target = os.readlink(child)
+            os.symlink(target, dest)
+            child.unlink()
+            moved += 1
+        elif child.is_file():
+            shutil.move(str(child), str(dest))
+            moved += 1
+    # Try to remove legacy dir if empty
+    try:
+        legacy.rmdir()
+    except OSError:
+        pass  # Not empty; leave it
+    if moved:
+        print(f"Migrated {project_path.name}/.research/ -> research/ ({moved} entries)")
+    return moved
+
+
+def _project_entry_paths(project_path: Path, slug: str, canonical: Path) -> tuple[Path, Path]:
+    """Return (real_copy_path, live_symlink_path) for a slug under the project."""
+    top = top_level_topic(slug)
+    real_copy = _project_research_dir(project_path) / top / canonical.name
+    live_link = _project_live_dir(project_path) / canonical.name
+    return real_copy, live_link
+
+
+def _ensure_project_gitignore(project_path: Path) -> None:
+    """Append `research/.live/` to project .gitignore if a .gitignore exists and rule is missing."""
+    gi = project_path / ".gitignore"
+    if not gi.exists():
+        return
+    text = gi.read_text()
+    rule = "research/.live/"
+    # Tolerate trailing slash variations
+    lines = [ln.rstrip() for ln in text.splitlines()]
+    if rule in lines or rule.rstrip("/") in lines or "research/.live" in lines:
+        return
+    suffix = "" if text.endswith("\n") else "\n"
+    gi.write_text(text + suffix + "# research plugin: live symlinks to ~/research/\n" + rule + "\n")
+
+
+def _write_project_copy_and_link(project_path: Path, canonical: Path, fm: dict) -> tuple[Path, Path]:
+    """Write the deterministic real-file copy and the .live symlink for one entry.
+
+    Returns (real_copy_path, live_link_path). Idempotent.
+    """
+    slug = fm["slug"]
+    real_copy, live_link = _project_entry_paths(project_path, slug, canonical)
+    real_copy.parent.mkdir(parents=True, exist_ok=True)
+    live_link.parent.mkdir(parents=True, exist_ok=True)
+    # Real copy: full canonical content, deterministic
+    real_copy.write_text(canonical.read_text())
+    # Symlink (replace if stale)
+    if live_link.exists() or live_link.is_symlink():
+        try:
+            live_link.unlink()
+        except OSError:
+            pass
+    try:
+        live_link.symlink_to(canonical)
+    except OSError as e:
+        print(f"WARN: could not create symlink {live_link}: {e}", file=sys.stderr)
+    _ensure_project_gitignore(project_path)
+    return real_copy, live_link
+
+
 def _append_project_index(project_path: Path, entry_path: Path, fm: dict) -> None:
-    research_dir = project_path / ".research"
-    research_dir.mkdir(parents=True, exist_ok=True)
-    index_md = research_dir / "INDEX.md"
-    if not index_md.exists():
-        index_md.write_text("# Project Research\n\nSymlinked entries from `~/research/`.\n\n")
-    # Create symlink
-    link_path = research_dir / entry_path.name
-    if link_path.exists() or link_path.is_symlink():
-        link_path.unlink()
-    link_path.symlink_to(entry_path)
-    # Append line
-    tldr = (fm.get("tldr_preview") or "").strip()[:80]
-    line = (
-        f"- [{fm.get('title', fm['slug'])}](./{entry_path.name}) — "
-        f"{tldr or 'see entry'} ({fm.get('reviewed', today_iso())}, "
-        f"{fm.get('confidence', 'inferred')})\n"
-    )
-    existing = index_md.read_text()
-    if f"](./{entry_path.name})" not in existing:
-        index_md.write_text(existing + line)
+    """Back-compat shim used by `link`. Routes through new copy+symlink+index regen flow."""
+    _migrate_legacy_research(project_path)
+    _write_project_copy_and_link(project_path, entry_path, fm)
+    _rebuild_project_research_md(project_path)
 
 
 def cmd_save(args: argparse.Namespace) -> int:
@@ -477,25 +583,37 @@ def cmd_save(args: argparse.Namespace) -> int:
     conn.commit()
     conn.close()
 
-    # Project symlinks
+    # Project copy + symlink + per-project index
+    project_outputs: list[tuple[str, Path, Path]] = []  # (project_name, real_copy, live_link)
     if not args.skip_symlink:
         for proj in fm.get("projects", []):
             proj_dir = GIT_FOLDER / proj
-            if proj_dir.exists() and proj_dir.is_dir():
-                _append_project_index(proj_dir, canonical, fm)
+            if not (proj_dir.exists() and proj_dir.is_dir()):
+                continue
+            # Migrate v0.2 layout if needed (idempotent)
+            _migrate_legacy_research(proj_dir)
+            real_copy, live_link = _write_project_copy_and_link(proj_dir, canonical, fm)
+            project_outputs.append((proj, real_copy, live_link))
 
-    # Rebuild indexes
-    if not args.skip_index:
+    # Rebuild indexes (canonical + per-project + portfolio) unless explicitly skipped
+    skip_index = bool(args.skip_index or getattr(args, "no_index", False))
+    if not skip_index:
         _rebuild_indexes()
+        for proj, _, _ in project_outputs:
+            proj_dir = GIT_FOLDER / proj
+            _rebuild_project_research_md(proj_dir)
+        _rebuild_portfolio()
 
     print(f"Saved: {fm['slug']}")
     print(f"  Canonical: {canonical}")
-    for proj in fm.get("projects", []):
-        proj_dir = GIT_FOLDER / proj
-        if proj_dir.exists():
-            link = proj_dir / ".research" / canonical.name
-            if link.exists():
-                print(f"  Symlink:  {link}")
+    for proj, real_copy, live_link in project_outputs:
+        print(f"  Project:  {proj}")
+        print(f"    Copy:     {real_copy}")
+        print(f"    Symlink:  {live_link}")
+        if not skip_index:
+            print(f"    Index:    {GIT_FOLDER / proj / 'RossLabs-Research.md'}")
+    if not skip_index:
+        print(f"  Portfolio: {BASE_DIR / 'PORTFOLIO.md'}")
     print(f"  Corroboration: {fm.get('corroboration', 0)}  Confidence: {fm.get('confidence')}")
     return 0
 
@@ -627,6 +745,155 @@ def cmd_link(args: argparse.Namespace) -> int:
 
 # ---------- index ----------
 
+def _rebuild_project_research_md(project_path: Path) -> Path | None:
+    """Regenerate <project>/RossLabs-Research.md from canonical entries linked to this project.
+
+    Returns the index file path, or None if no entries point to this project.
+    Pure read from DB + filesystem; no LLM calls.
+    """
+    ensure_db()
+    conn = db_connect()
+    project_name = project_path.name
+    rows = [dict(r) for r in conn.execute(
+        "SELECT slug, title, path, topics, projects, tags, reviewed, status, "
+        "confidence, tldr FROM entries WHERE status != 'archived' ORDER BY slug"
+    ).fetchall()]
+    conn.close()
+    matched: list[dict] = []
+    for r in rows:
+        projs = json.loads(r["projects"] or "[]")
+        if project_name in projs:
+            r["topics"] = json.loads(r["topics"] or "[]")
+            r["tags"] = json.loads(r["tags"] or "[]")
+            matched.append(r)
+    research_dir = _project_research_dir(project_path)
+    index_md = project_path / "RossLabs-Research.md"
+    if not matched:
+        # No entries; remove stale index if present, leave the dir alone.
+        if index_md.exists():
+            try:
+                index_md.unlink()
+            except OSError:
+                pass
+        return None
+    research_dir.mkdir(parents=True, exist_ok=True)
+    # Group by top-level topic from slug
+    by_top: dict[str, list[dict]] = {}
+    for r in matched:
+        by_top.setdefault(top_level_topic(r["slug"]), []).append(r)
+
+    lines: list[str] = []
+    lines.append(f"# Research \u2014 {project_name}\n\n")
+    lines.append("_Auto-generated by RossLabs Research Plugin. Do not edit by hand; "
+                 "changes are overwritten on next save._\n\n")
+    lines.append(f"Last updated: {today_iso()}\n\n")
+    lines.append(f"## Entries ({len(matched)} total)\n\n")
+    for top in sorted(by_top):
+        lines.append(f"### {top}\n")
+        for r in sorted(by_top[top], key=lambda x: x["slug"]):
+            rel_md = f"research/{top}/{Path(r['path']).name}"
+            tier = ""
+            # First T1/T2 tag if present in tags or sources tier (best effort)
+            # Use confidence + status as proxies the user spec asked for
+            confidence = r.get("confidence", "inferred") or "inferred"
+            status = r.get("status", "evergreen") or "evergreen"
+            summary = _summary_from_tldr(r.get("tldr") or "")
+            head = f"- [{r['title']}]({rel_md}) \u2014 reviewed {r['reviewed']}, {confidence}, {status}\n"
+            lines.append(head)
+            if summary:
+                lines.append(f"  > {summary}\n")
+        lines.append("\n")
+
+    # Cross-references section
+    lines.append("## Cross-references\n\n")
+    lines.append("This project's research also relates to entries in the central corpus:\n")
+    # For each topic touched by this project, show count of total entries vs here
+    conn2 = db_connect()
+    total_rows = [dict(r) for r in conn2.execute(
+        "SELECT slug FROM entries WHERE status != 'archived'"
+    ).fetchall()]
+    conn2.close()
+    total_by_top: dict[str, int] = {}
+    for r in total_rows:
+        total_by_top[top_level_topic(r["slug"])] = total_by_top.get(top_level_topic(r["slug"]), 0) + 1
+    for top in sorted(by_top):
+        total = total_by_top.get(top, len(by_top[top]))
+        here = len(by_top[top])
+        lines.append(f"- `~/research/topics/{top}/` ({total} total entries, {here} here)\n")
+    lines.append("\n")
+    lines.append("For the full master portfolio across all your projects, see `~/research/PORTFOLIO.md`.\n")
+
+    index_md.write_text("".join(lines))
+    return index_md
+
+
+def _rebuild_portfolio() -> Path:
+    """Regenerate ~/research/PORTFOLIO.md across all projects + cross-cutting topics."""
+    ensure_db()
+    conn = db_connect()
+    rows = [dict(r) for r in conn.execute(
+        "SELECT slug, title, path, topics, projects, tags, reviewed, status FROM entries "
+        "WHERE status != 'archived'"
+    ).fetchall()]
+    conn.close()
+    by_project: dict[str, list[dict]] = {}
+    cross_cutting: list[dict] = []
+    for r in rows:
+        projs = json.loads(r["projects"] or "[]")
+        r["topics"] = json.loads(r["topics"] or "[]")
+        r["tags"] = json.loads(r["tags"] or "[]")
+        if not projs:
+            cross_cutting.append(r)
+        else:
+            for p in projs:
+                by_project.setdefault(p, []).append(r)
+
+    lines: list[str] = []
+    lines.append("# Research Portfolio\n\n")
+    lines.append(f"_Auto-generated. Updated: {today_iso()}_\n\n")
+    lines.append("## By Project\n\n")
+    if not by_project:
+        lines.append("_No project-tagged entries yet._\n\n")
+    for proj in sorted(by_project):
+        entries = by_project[proj]
+        last_reviewed = max((e.get("reviewed") or "") for e in entries) or "unknown"
+        topics_set = sorted({top_level_topic(e["slug"]) for e in entries})
+        proj_path = GIT_FOLDER / proj
+        lines.append(f"### {proj}\n")
+        lines.append(f"- {len(entries)} entries, last updated {last_reviewed}\n")
+        lines.append(f"- Topics: {', '.join(topics_set)}\n")
+        lines.append(f"- Path: {proj_path}/research/\n")
+        lines.append(f"- Project index: {proj_path}/RossLabs-Research.md\n\n")
+
+    lines.append("## Cross-cutting (no project assignment)\n\n")
+    if not cross_cutting:
+        lines.append("_None._\n\n")
+    else:
+        by_top_cc: dict[str, list[dict]] = {}
+        for r in cross_cutting:
+            by_top_cc.setdefault(top_level_topic(r["slug"]), []).append(r)
+        for top in sorted(by_top_cc):
+            entries = by_top_cc[top]
+            slugs = [e["slug"].split(".", 1)[1] if "." in e["slug"] else e["slug"]
+                     for e in sorted(entries, key=lambda x: x["slug"])]
+            lines.append(f"### {top} ({len(entries)} entries)\n")
+            lines.append(f"- {', '.join(slugs)}\n\n")
+
+    lines.append("## Discovery for external tools\n\n")
+    lines.append("Any LLM or tool can point at this file as the entry point. "
+                 "Each entry resolves to a markdown file with:\n")
+    lines.append("- Frontmatter (slug, title, topics, sources with tier scoring)\n")
+    lines.append("- Three-layer body: TL;DR / Notes / Raw\n")
+    lines.append("- Cited sources\n\n")
+    lines.append("Reading order for max coverage:\n")
+    lines.append("1. PORTFOLIO.md (this file) \u2014 corpus overview\n")
+    lines.append("2. ~/research/by-topic.md \u2014 flat topic index\n")
+    lines.append("3. ~/research/topics/<top-level>/*.md \u2014 individual entries\n")
+    out = BASE_DIR / "PORTFOLIO.md"
+    out.write_text("".join(lines))
+    return out
+
+
 def _rebuild_indexes() -> None:
     """Regenerate index.md / by-topic.md / by-project.md / indices/<topic>.md / inbound."""
     ensure_db()
@@ -736,7 +1003,27 @@ def cmd_index(args: argparse.Namespace) -> int:
     ensure_layout()
     ensure_db()
     _rebuild_indexes()
+    # Rebuild every project's RossLabs-Research.md based on current DB
+    conn = db_connect()
+    rows = conn.execute(
+        "SELECT projects FROM entries WHERE status != 'archived'"
+    ).fetchall()
+    conn.close()
+    project_names: set[str] = set()
+    for row in rows:
+        for p in json.loads(row["projects"] or "[]"):
+            project_names.add(p)
+    rebuilt = 0
+    for p in sorted(project_names):
+        proj_dir = GIT_FOLDER / p
+        if proj_dir.exists() and proj_dir.is_dir():
+            _migrate_legacy_research(proj_dir)
+            _rebuild_project_research_md(proj_dir)
+            rebuilt += 1
+    portfolio = _rebuild_portfolio()
     print("Indexes rebuilt.")
+    print(f"  Per-project: {rebuilt} updated")
+    print(f"  Portfolio:   {portfolio}")
     return 0
 
 
@@ -1579,6 +1866,251 @@ def _extract_and_cache(args: argparse.Namespace, path: Path) -> int:
     return 0
 
 
+# ---------- recategorize ----------
+
+def _infer_subprefix(slug: str, top: str) -> str:
+    """Given a slug like 'prompting.techniques.few-shot', return 'prompting.techniques' (one level deeper than top)."""
+    rest = slug[len(top) + 1:] if slug.startswith(top + ".") else slug
+    parts = rest.split(".")
+    if len(parts) <= 1:
+        # No deeper segment; use the slug itself as a leaf marker
+        return f"{top}.<leaf>"
+    return f"{top}.{parts[0]}"
+
+
+def cmd_recategorize(args: argparse.Namespace) -> int:
+    """Read-only suggestion mode by default. With --apply --plan <file>, perform moves."""
+    ensure_db()
+    conn = db_connect()
+    rows = [dict(r) for r in conn.execute(
+        "SELECT slug, title, topics, tldr FROM entries WHERE status != 'archived' ORDER BY slug"
+    ).fetchall()]
+    conn.close()
+
+    by_top: dict[str, list[dict]] = {}
+    for r in rows:
+        by_top.setdefault(top_level_topic(r["slug"]), []).append(r)
+
+    suggestions: list[dict] = []
+    for top, entries in sorted(by_top.items()):
+        if len(entries) <= args.threshold:
+            continue
+        # Cluster by inferred sub-prefix
+        clusters: dict[str, list[str]] = {}
+        for e in entries:
+            sub = _infer_subprefix(e["slug"], top)
+            clusters.setdefault(sub, []).append(e["slug"])
+        suggestion = {
+            "top_level": top,
+            "current_count": len(entries),
+            "proposed_clusters": {k: sorted(v) for k, v in sorted(clusters.items(), key=lambda x: -len(x[1]))},
+        }
+        suggestions.append(suggestion)
+
+    if args.json:
+        print(json.dumps({"threshold": args.threshold, "suggestions": suggestions}, indent=2))
+        return 0
+
+    if not suggestions:
+        print(f"No top-level topics exceed threshold of {args.threshold} entries.")
+        return 0
+
+    print(f"# Recategorization suggestions (threshold: {args.threshold} entries per top-level)\n")
+    for s in suggestions:
+        proposals = ", ".join(f"{k}.* ({len(v)})" for k, v in s["proposed_clusters"].items())
+        print(f"- {s['top_level']}/ has {s['current_count']} entries \u2014 consider splitting: {proposals}")
+        for cluster_name, slugs in s["proposed_clusters"].items():
+            print(f"    {cluster_name}:")
+            for sl in slugs:
+                print(f"      - {sl}")
+        print()
+
+    if args.apply:
+        if not args.plan:
+            print("ERROR: --apply requires --plan <file.json> with explicit slug renames.", file=sys.stderr)
+            return 2
+        plan_path = Path(args.plan).expanduser().resolve()
+        if not plan_path.exists():
+            print(f"ERROR: plan file not found: {plan_path}", file=sys.stderr)
+            return 2
+        try:
+            plan = json.loads(plan_path.read_text())
+        except json.JSONDecodeError as e:
+            print(f"ERROR: invalid JSON in plan: {e}", file=sys.stderr)
+            return 2
+        if not isinstance(plan, dict) or "renames" not in plan:
+            print("ERROR: plan must be {\"renames\": {\"old.slug\": \"new.slug\", ...}}", file=sys.stderr)
+            return 2
+        renames = plan["renames"]
+        moved = 0
+        conn = db_connect()
+        for old_slug, new_slug in renames.items():
+            row = conn.execute("SELECT path FROM entries WHERE slug = ?", (old_slug,)).fetchone()
+            if not row:
+                print(f"  SKIP: {old_slug} (not in DB)")
+                continue
+            old_path = Path(row["path"])
+            if not old_path.exists():
+                print(f"  SKIP: {old_slug} (file missing)")
+                continue
+            new_top = top_level_topic(new_slug)
+            new_path = BASE_DIR / "topics" / new_top / f"{new_slug}.md"
+            new_path.parent.mkdir(parents=True, exist_ok=True)
+            text = old_path.read_text()
+            fm, body = parse_frontmatter(text)
+            fm["slug"] = new_slug
+            new_path.write_text(dump_frontmatter(fm, body))
+            # Leave a redirect stub at the old location
+            old_path.write_text(
+                f"---\nstatus: archived\nredirect: ../../topics/{new_top}/{new_slug}.md\n"
+                f"archived: {today_iso()}\n---\nMoved to [[{new_slug}]] via recategorize.\n"
+            )
+            conn.execute(
+                "UPDATE entries SET slug = ?, path = ? WHERE slug = ?",
+                (new_slug, str(new_path), old_slug),
+            )
+            moved += 1
+            print(f"  MOVED: {old_slug} -> {new_slug}")
+        conn.commit()
+        conn.close()
+        if moved:
+            _rebuild_indexes()
+            _rebuild_portfolio()
+        print(f"\nApplied {moved} renames.")
+    else:
+        print("Read-only mode. To apply, build a JSON plan and re-run with: --apply --plan <plan.json>")
+        print('Plan format: {"renames": {"old.slug": "new.slug", ...}}')
+    return 0
+
+
+# ---------- ingest ----------
+
+def _slugify(s: str) -> str:
+    s = s.strip().lower()
+    s = re.sub(r"[^\w\s.-]", "", s)
+    s = re.sub(r"\s+", "-", s)
+    s = re.sub(r"-+", "-", s).strip("-.")
+    return s or "untitled"
+
+
+def _draft_entry_from_md(path: Path, project: str | None, topics: list[str]) -> dict:
+    """Deterministic extraction: title from first H1 or filename, slug from filename."""
+    text = path.read_text()
+    # If it already has frontmatter, keep it; otherwise derive
+    fm, body = parse_frontmatter(text)
+    if not fm:
+        body = text
+        h1 = re.search(r"^#\s+(.+?)\s*$", text, re.MULTILINE)
+        title = h1.group(1).strip() if h1 else path.stem
+        slug_base = _slugify(path.stem)
+        # If no topic specified, use first slug segment or "ingest"
+        top = topics[0] if topics else "ingest"
+        slug = slug_base if "." in slug_base else f"{top}.{slug_base}"
+        fm = {
+            "slug": slug,
+            "title": title,
+            "topics": topics or [top],
+            "projects": [project] if project else [],
+            "status": "fleeting",
+            "workflow": "general",
+            "created": today_iso(),
+            "reviewed": today_iso(),
+            "topic_velocity": "medium",
+            "tags": [],
+            "confidence": "inferred",
+            "corroboration": 0,
+            "sources": [],
+            "related": [],
+            "inbound": [],
+        }
+    else:
+        # Augment existing frontmatter
+        if project and project not in (fm.get("projects") or []):
+            fm.setdefault("projects", []).append(project)
+        for t in topics:
+            if t not in (fm.get("topics") or []):
+                fm.setdefault("topics", []).append(t)
+    # Ensure body has the three sections; if not, treat existing body as Notes
+    if "## TL;DR" not in body and "## Notes" not in body and "## Raw" not in body:
+        body = (
+            "## TL;DR\n\n_Pending synthesis._\n\n"
+            "## Notes\n\n" + body.strip() + "\n\n"
+            "## Raw\n\n_Source preserved at ingest path._\n"
+        )
+    return {"frontmatter": fm, "body": body, "source_path": str(path)}
+
+
+def cmd_ingest(args: argparse.Namespace) -> int:
+    src = Path(args.path).expanduser().resolve()
+    if not src.exists():
+        print(f"ERROR: path not found: {src}", file=sys.stderr)
+        return 2
+
+    if args.inbox:
+        # Just copy raw files to ~/research/inbox/, no draft, no save
+        ensure_layout()
+        inbox = BASE_DIR / "inbox"
+        inbox.mkdir(parents=True, exist_ok=True)
+        copied = 0
+        files = [src] if src.is_file() else [p for p in src.rglob("*.md")]
+        for f in files:
+            dest = inbox / f.name
+            # If collision, suffix
+            n = 2
+            while dest.exists():
+                dest = inbox / f"{f.stem}-{n}{f.suffix}"
+                n += 1
+            shutil.copy2(f, dest)
+            copied += 1
+            print(f"  inbox: {dest}")
+        print(f"\nCopied {copied} file(s) to {inbox}")
+        return 0
+
+    topics = [t.strip() for t in (args.topics or "").split(",") if t.strip()]
+    files = [src] if src.is_file() else sorted(src.rglob("*.md"))
+    if not files:
+        print(f"No markdown files found at {src}", file=sys.stderr)
+        return 1
+
+    drafts: list[dict] = []
+    for f in files:
+        if not f.suffix.lower() in (".md", ".markdown"):
+            continue
+        draft = _draft_entry_from_md(f, args.project, topics)
+        drafts.append(draft)
+
+    if args.json:
+        print(json.dumps(drafts, indent=2, default=str))
+    else:
+        for d in drafts:
+            fm = d["frontmatter"]
+            print(f"\n--- DRAFT: {fm['slug']} (from {d['source_path']}) ---")
+            print(dump_frontmatter(fm, d["body"]))
+
+    if args.save:
+        ensure_layout()
+        ensure_db()
+        saved = 0
+        for d in drafts:
+            fm = d["frontmatter"]
+            tmp = BASE_DIR / "inbox" / f".ingest-{fm['slug']}.md"
+            tmp.parent.mkdir(parents=True, exist_ok=True)
+            tmp.write_text(dump_frontmatter(fm, d["body"]))
+            # Reuse cmd_save by faking args
+            class _A:
+                file = str(tmp)
+                move_source = True
+                skip_symlink = False
+                skip_index = False
+                no_index = False
+            cmd_save(_A())  # type: ignore[arg-type]
+            saved += 1
+        print(f"\nSaved {saved} draft(s).")
+    else:
+        print("\n(dry run \u2014 pass --save to persist; or pipe to /research:save manually)")
+    return 0
+
+
 # ---------- main / argparse ----------
 
 def main() -> int:
@@ -1592,8 +2124,9 @@ def main() -> int:
     sp = sub.add_parser("save", help="Persist a markdown entry file")
     sp.add_argument("--file", required=True, help="Path to entry markdown with frontmatter")
     sp.add_argument("--move-source", action="store_true", help="Delete source file after copy to canonical path")
-    sp.add_argument("--skip-symlink", action="store_true", help="Do not create project symlinks (used by hook)")
-    sp.add_argument("--skip-index", action="store_true", help="Do not rebuild indexes")
+    sp.add_argument("--skip-symlink", action="store_true", help="Do not create project copy/symlink (used by hook)")
+    sp.add_argument("--skip-index", action="store_true", help="Do not rebuild any indexes (legacy alias of --no-index)")
+    sp.add_argument("--no-index", action="store_true", help="Skip RossLabs-Research.md and PORTFOLIO.md regen on this save")
     sp.set_defaults(func=cmd_save)
 
     sp = sub.add_parser("search", help="Full-text search (FTS5 + BM25)")
@@ -1646,6 +2179,22 @@ def main() -> int:
     sp = sub.add_parser("compress", help="Archive Raw, prep for Claude rewrite")
     sp.add_argument("slug")
     sp.set_defaults(func=cmd_compress)
+
+    sp = sub.add_parser("recategorize", help="Suggest top-level taxonomy splits (read-only by default)")
+    sp.add_argument("--threshold", type=int, default=8, help="Min entries per top-level before suggesting a split")
+    sp.add_argument("--apply", action="store_true", help="Apply slug renames from --plan")
+    sp.add_argument("--plan", help="JSON file with {\"renames\": {old: new, ...}}")
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_recategorize)
+
+    sp = sub.add_parser("ingest", help="Bulk ingest markdown files; print drafts (or --save)")
+    sp.add_argument("path", help="File or directory of .md files")
+    sp.add_argument("--project", help="Auto-tag drafts with this project")
+    sp.add_argument("--topics", help="Comma-separated topics for drafts")
+    sp.add_argument("--inbox", action="store_true", help="Just copy files to ~/research/inbox/, no draft/save")
+    sp.add_argument("--save", action="store_true", help="Persist each draft via the normal save flow")
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_ingest)
 
     sp = sub.add_parser(
         "extract",

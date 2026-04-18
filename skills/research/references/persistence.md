@@ -11,7 +11,8 @@ How research gets saved into the central knowledge base at `~/research/`.
   index.md                      # AUTO: chronological list of all entries
   by-topic.md                   # AUTO: grouped by tag
   by-project.md                 # AUTO: grouped by project
-  review-due.md                 # AUTO: staleness-ranked (v0.3)
+  review-due.md                 # AUTO: staleness-ranked
+  PORTFOLIO.md                  # AUTO (v0.3): master corpus index, by project + cross-cutting
   topics/
     <top-level>/
       <slug>.md                 # canonical entries
@@ -21,7 +22,18 @@ How research gets saved into the central knowledge base at `~/research/`.
     <slug>.md                   # moved, never deleted
     raw/<slug>.md               # pre-compress Raw excerpts
   verifier-log/<slug>/<atom>.json   # per-claim verification artifacts (v0.2+)
-  inbox/                        # unrefined fleeting notes
+  inbox/                        # unrefined fleeting notes; populated by /research:ingest --inbox
+```
+
+Per project (when entry frontmatter has `projects: [foo]` and `~/Desktop/git-folder/foo/` exists):
+
+```
+<project>/
+  research/
+    <top>/<slug>.md             # AUTO (v0.3): real-file copy, visible, committed
+    .live/<slug>.md             # AUTO: symlink to ~/research/topics/<top>/<slug>.md (gitignored)
+  RossLabs-Research.md          # AUTO (v0.3): per-project index of all linked entries
+  .gitignore                    # auto-amended to include `research/.live/`
 ```
 
 ## Slug rules
@@ -134,20 +146,19 @@ Verbatim extracts. One section per source:
 
 The Raw layer is what FTS5 indexes for retrieval and what the v0.2 verifier chunks.
 
-## Project symlink
+## Project association (v0.3)
 
-When `projects[]` is non-empty and a project directory exists at `~/Desktop/git-folder/<name>/`, `research.py save` creates:
+When `projects[]` is non-empty and a project directory exists at `~/Desktop/git-folder/<name>/`, `research.py save` does three things:
 
-```
-<project>/.research/<slug>.md -> ~/research/topics/<top>/<slug>.md
-```
+1. **Real-file copy**: writes `<project>/research/<top>/<slug>.md` with the full canonical content (frontmatter + body). Visible, gets committed with the project. Travels with the repo.
+2. **Live symlink**: creates `<project>/research/.live/<slug>.md` → `~/research/topics/<top>/<slug>.md`. Lets you follow updates from the central corpus. Auto-added to project `.gitignore` if one exists.
+3. **Project index**: regenerates `<project>/RossLabs-Research.md` — auto-generated, do-not-edit list grouped by top-level topic, with title, link, last reviewed, confidence, and a 1-line summary extracted from each entry's TL;DR.
 
-And appends one line to `<project>/.research/INDEX.md`:
-```
-- [<title>](./<slug>.md) — <first 80 chars of TL;DR> (<date>, <confidence>)
-```
+Master view: `~/research/PORTFOLIO.md` is regenerated alongside, summarizing every project (entries / topics / paths) plus cross-cutting topics.
 
-If `.research/INDEX.md` doesn't exist, it's created with a header.
+`--no-index` defers the per-project and portfolio regen on a single save (useful for batches). `/research:index` flushes everything.
+
+**Migration from v0.2**: any project with the old `<project>/.research/` directory is silently migrated to `<project>/research/.live/` on first save. Idempotent.
 
 ## Update vs create
 
