@@ -27,6 +27,6 @@ python3 "${CLAUDE_PLUGIN_ROOT}/research.py" extract $ARGUMENTS
 
 Output is markdown to stdout by default. Paste into the `## Raw` section of the entry you're persisting in Phase 6, tagging with the source path and capture date.
 
-If Omniparse is not found, the command prints a build hint: `cd ~/Desktop/git-folder/Omniparse && npm install && npm run build`.
+Omniparse ships vendored at `${CLAUDE_PLUGIN_ROOT}/vendor/omniparse/dist/bin/omniparse.js` (self-contained, no install required). Only `node >= 18` must be on PATH. A user-installed `omniparse` on PATH will override the vendored copy when present. See `vendor/omniparse/BUILD.md` to re-vendor from upstream.
 
 See `references/persistence.md` for the full decision table.

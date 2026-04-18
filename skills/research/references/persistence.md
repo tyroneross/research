@@ -93,14 +93,13 @@ Phase 2-3 research populates the `## Raw` section. Pick the right extractor per 
 
 ### Omniparse
 
-`/research:extract` routes everything through `@tyroneross/omniparse` — a user-authored Node.js CLI (MIT) that ships with the local monorepo at `~/Desktop/git-folder/Omniparse/`. No external Python extraction libraries are used. PDF handling is basic text extraction (no table or formula recognition). If academic PDF fidelity ever blocks real work, the right fix is to extend Omniparse rather than add another dependency.
+`/research:extract` routes everything through `@tyroneross/omniparse` — a user-authored Node.js CLI (FSL-1.1-MIT) that ships **vendored** inside this plugin at `vendor/omniparse/dist/bin/omniparse.js`. The vendored build is self-contained: all runtime deps (xlsx, sax, p-limit) are inlined, so no `npm install` is needed. Only `node >= 18` must be on PATH. No external Python extraction libraries are used. PDF handling is basic text extraction (no table or formula recognition). If academic PDF fidelity ever blocks real work, the right fix is to extend Omniparse rather than add another dependency.
 
 Omniparse binary resolution (in order):
-1. `omniparse` on `PATH` (global install).
-2. Built dist at `~/Desktop/git-folder/Omniparse/packages/sdk/dist/bin/omniparse.js` via `node`.
-3. `npx --prefix ~/Desktop/git-folder/Omniparse omniparse`.
+1. `omniparse` on `PATH` (allows a user-installed global override).
+2. Vendored self-contained build at `<plugin-root>/vendor/omniparse/dist/bin/omniparse.js` invoked via `node`.
 
-If none resolve, the command prints a build hint: `cd ~/Desktop/git-folder/Omniparse && npm install && npm run build`.
+If neither resolves, the command explains that the vendored copy is missing or `node` isn't installed, and points at `vendor/omniparse/BUILD.md` for re-vendoring instructions.
 
 ### Caching
 
