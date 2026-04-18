@@ -1,0 +1,17 @@
+{
+  "description": "research plugin hooks — auto-reingest entries on Write/Edit, rebuild indexes",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-write-reingest.sh",
+            "timeout": 15000
+          }
+        ]
+      }
+    ]
+  }
+}

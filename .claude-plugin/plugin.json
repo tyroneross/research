@@ -1,0 +1,20 @@
+{
+  "name": "research",
+  "version": "0.1.0",
+  "description": "Structured research with central persistence, horizontal topic libraries, deterministic source scoring, claim verification, and lifecycle management. Writes to ~/research/ with project symlinks.",
+  "author": {
+    "name": "Tyrone Ross"
+  },
+  "repository": "https://github.com/tyroneross/RossLabs-AI-Toolkit",
+  "license": "MIT",
+  "keywords": [
+    "research",
+    "knowledge-base",
+    "aggregation",
+    "fact-checking",
+    "source-scoring"
+  ],
+  "skills": "./skills",
+  "commands": "./commands",
+  "hooks": "./hooks/hooks.json"
+}

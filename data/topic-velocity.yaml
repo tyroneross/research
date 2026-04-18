@@ -1,0 +1,29 @@
+# Default staleness weights per top-level topic. Used by research.py review.
+# Override per entry via frontmatter `topic_velocity:` field.
+# high   — field changes fast (months matter)
+# medium — established but evolving
+# low    — stable fundamentals
+
+prompting: high
+model-deployment: high
+llm-evals: high
+llm: high
+agents: high
+
+ai-tooling: high
+frontend: medium
+backend: medium
+db: medium
+web-frameworks: medium
+cloud: medium
+devops: medium
+design: medium
+ux: medium
+security: medium
+
+algorithms: low
+math: low
+cs-theory: low
+statistics: low
+compilers: low
+systems: low
