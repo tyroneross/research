@@ -15,8 +15,5 @@
     "source-scoring",
     "fts5",
     "zettelkasten"
-  ],
-  "skills": "./skills",
-  "commands": "./commands",
-  "hooks": "./hooks/hooks.json"
+  ]
 }

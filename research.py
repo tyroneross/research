@@ -42,7 +42,7 @@ BASE_DIR = Path(os.environ.get("RESEARCH_BASE_DIR", Path.home() / "research"))
 DB_PATH = BASE_DIR / ".db.sqlite3"
 PLUGIN_ROOT = Path(__file__).resolve().parent
 DATA_DIR = PLUGIN_ROOT / "data"
-GIT_FOLDER = Path.home() / "Desktop" / "git-folder"
+GIT_FOLDER = Path(os.environ.get("RESEARCH_PROJECTS_DIR", Path.home() / "Desktop" / "git-folder"))
 
 
 # ---------- Schema ----------
@@ -163,7 +163,7 @@ def split_sections(body: str) -> dict[str, str]:
 
 
 def detect_project(cwd: Path | None = None) -> str | None:
-    """If cwd is under ~/Desktop/git-folder/<name>/, return <name>."""
+    """If cwd is under $RESEARCH_PROJECTS_DIR/<name>/, return <name>."""
     cwd = cwd or Path.cwd()
     try:
         rel = cwd.resolve().relative_to(GIT_FOLDER.resolve())

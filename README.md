@@ -4,8 +4,14 @@ Personal research plugin for Claude Code. Keeps a central, searchable, lifecycle
 
 ## Install
 
+```
+/plugin marketplace add tyroneross/research
+/plugin install research@research
+```
+
+Then install the Python dependency:
+
 ```bash
-ln -s ~/Desktop/git-folder/RossLabs-AI-Toolkit/plugins/research ~/.claude/plugins/research
 pip install pyyaml            # required
 pip install sympy             # optional (v0.2 symbolic verification)
 ```
