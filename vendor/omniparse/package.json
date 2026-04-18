@@ -1,0 +1,14 @@
+{
+  "//": "Vendored copy of @tyroneross/omniparse. Do not edit in place. Re-vendor from upstream; see .upstream for the source commit. Rebuild instructions live in BUILD.md.",
+  "name": "@tyroneross/omniparse-vendored",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Vendored, self-contained build of @tyroneross/omniparse for the research plugin. All runtime deps inlined; no node_modules needed.",
+  "bin": {
+    "omniparse": "./dist/bin/omniparse.js"
+  },
+  "license": "FSL-1.1-MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

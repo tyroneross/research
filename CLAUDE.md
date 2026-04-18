@@ -26,7 +26,7 @@ Central, token-efficient research knowledge base. Persists findings to `~/resear
 
 - Required: `PyYAML` (frontmatter parsing).
 - Optional (v0.2+): `sympy` for symbolic math verification. Graceful skip if absent.
-- Optional (extraction): `@tyroneross/omniparse` CLI (Node.js, user-authored, MIT) — powers `/research:extract` for PDF, Excel, PPTX, Python, and directories. Resolved in order: `shutil.which("omniparse")`, then the built dist at `~/Desktop/git-folder/Omniparse/packages/sdk/dist/bin/omniparse.js` via `node`, then `npx --prefix <repo-root> omniparse`. If none found, the command prints a build hint.
+- Optional (extraction): vendored `@tyroneross/omniparse` CLI (Node.js, user-authored, FSL-1.1-MIT) lives at `vendor/omniparse/dist/bin/omniparse.js` as a self-contained, pre-built bundle — all runtime deps (xlsx, sax, p-limit) are inlined, so no `npm install` is required. Resolved in order: `shutil.which("omniparse")` first (allows a global override), then the vendored copy via `node`. Re-vendor upstream changes by following `vendor/omniparse/BUILD.md`. `node` >= 18 must be on PATH.
 - Everything else is Python stdlib or Claude Code built-in tools. No AGPL deps, no model-weight downloads, no external Python extraction libraries.
 
 ## Not to do

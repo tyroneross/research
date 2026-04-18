@@ -51,6 +51,16 @@ python ~/.claude/plugins/research/research.py init
 | `/research:review` | Surface stale / review-due entries |
 | `/research:compress <slug>` | Compact an entry's TL;DR and Raw sections |
 
+## Vendored dependencies
+
+`/research:extract` routes document parsing (PDF, Excel, PPTX, Python, directories) through a self-contained, pre-built copy of `@tyroneross/omniparse` that ships with this plugin at `vendor/omniparse/`. All JS runtime deps are inlined — no `npm install` needed. Only `node >= 18` must be on PATH.
+
+- Upstream: https://github.com/tyroneross/Omniparse (see `vendor/omniparse/.upstream` for the exact commit)
+- License: FSL-1.1-MIT (copied verbatim to `vendor/omniparse/LICENSE`)
+- Re-vendor: follow `vendor/omniparse/BUILD.md`
+
+A user-installed `omniparse` on `PATH` will be preferred over the vendored copy when present.
+
 ## Philosophy
 
 - **Non-LLM parsers first, LLM for judgment** — Claude's WebFetch/Read extract content; scripts compute what can be computed.

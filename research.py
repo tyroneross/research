@@ -1383,29 +1383,27 @@ OMNIPARSE_EXTS = {
 # Read-native formats — caller should use Claude's Read tool directly.
 READ_NATIVE_EXTS = {".md", ".markdown", ".txt", ".json", ".yaml", ".yml"}
 
-# Fallback location for the built Omniparse dist in the monorepo.
-OMNIPARSE_REPO_ROOT = Path.home() / "Desktop" / "git-folder" / "Omniparse"
-OMNIPARSE_KNOWN_BIN = (
-    OMNIPARSE_REPO_ROOT / "packages" / "sdk" / "dist" / "bin" / "omniparse.js"
-)
+# Vendored Omniparse CLI — self-contained build lives alongside this script.
+# Re-vendor by following vendor/omniparse/BUILD.md.
+PLUGIN_ROOT = Path(__file__).resolve().parent
+VENDORED_OMNIPARSE_BIN = PLUGIN_ROOT / "vendor" / "omniparse" / "dist" / "bin" / "omniparse.js"
 
 
 def _find_omniparse() -> list[str] | None:
     """Command list to invoke Omniparse CLI, or None if unavailable.
     Resolution order:
-      1. `omniparse` on PATH (globally installed or symlinked).
-      2. Built dist invoked via `node` at the known monorepo location.
-      3. `npx --prefix <repo-root> omniparse` (lets npx resolve the package).
+      1. `omniparse` on PATH (allows a user-installed global override).
+      2. Vendored self-contained build at vendor/omniparse/dist/bin/omniparse.js
+         invoked via `node`.
+    The research plugin ships a pre-built, self-contained vendored copy, so
+    (2) is the primary code path. No node_modules install is required.
     """
     exe = shutil.which("omniparse")
     if exe:
         return [exe]
     node = shutil.which("node")
-    if node and OMNIPARSE_KNOWN_BIN.exists():
-        return [node, str(OMNIPARSE_KNOWN_BIN)]
-    npx = shutil.which("npx")
-    if npx and OMNIPARSE_REPO_ROOT.exists():
-        return [npx, "--prefix", str(OMNIPARSE_REPO_ROOT), "omniparse"]
+    if node and VENDORED_OMNIPARSE_BIN.exists():
+        return [node, str(VENDORED_OMNIPARSE_BIN)]
     return None
 
 
@@ -1458,9 +1456,11 @@ def _run_omniparse(args: argparse.Namespace, path: Path) -> tuple[int, str | Non
     cmd_prefix = _find_omniparse()
     if cmd_prefix is None:
         print(
-            "ERROR: Omniparse CLI not found. Install or build it:\n"
-            f"  cd {OMNIPARSE_REPO_ROOT} && npm install && npm run build\n"
-            "Or install globally so `omniparse` is on PATH.",
+            "ERROR: Omniparse CLI not found. The vendored copy at\n"
+            f"  {VENDORED_OMNIPARSE_BIN}\n"
+            "is missing or `node` is not on PATH. Install Node.js >=18, or\n"
+            "rebuild the vendored dist by following:\n"
+            f"  {PLUGIN_ROOT / 'vendor' / 'omniparse' / 'BUILD.md'}",
             file=sys.stderr,
         )
         return 3, None

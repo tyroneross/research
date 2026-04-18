@@ -1,0 +1,14 @@
+source_repo: https://github.com/tyroneross/Omniparse
+source_path: packages/sdk
+upstream_commit: 392acf8eeb5df898309d16051a8e06ae80bbe86d
+upstream_version: 1.0.0
+upstream_license: FSL-1.1-MIT
+vendored_on: 2026-04-18
+build_notes: |
+  Rebuilt locally with tsup.config.ts modified to inline all dependencies
+  (xlsx, sax, p-limit) via `noExternal: [/.*/]`. Original tsup.config in
+  upstream declares `external: ['xlsx', 'sax']`, which would produce a
+  dist that requires node_modules at runtime. The inlined build produces
+  a single self-contained dist/bin/omniparse.js with zero external
+  `require()` calls for runtime deps.
+  Verification: `grep -E "require\(\"(xlsx|sax|p-limit)\"\)" dist/bin/omniparse.js` → 0 matches.
