@@ -1,0 +1,31 @@
+{
+  "name": "research",
+  "version": "0.3.1",
+  "description": "Structured research with central persistence, horizontal topic libraries, deterministic source scoring, claim verification, lifecycle management, bulk ingestion, and two project-association mechanisms: save with `projects:` for plugin-authored entries (symlink-only), or link-project for pre-existing external research directories (plugin does not modify them). Writes to ~/research/.",
+  "author": {
+    "name": "Tyrone Ross"
+  },
+  "repository": "https://github.com/tyroneross/research",
+  "license": "MIT",
+  "keywords": [
+    "research",
+    "knowledge-base",
+    "aggregation",
+    "fact-checking",
+    "source-scoring",
+    "fts5",
+    "zettelkasten"
+  ],
+  "skills": "./skills",
+  "interface": {
+    "displayName": "Research",
+    "shortDescription": "Structured research with central persistence, horizontal topic libraries, deterministic source scoring, claim verification, lifecycle management, bulk ingestion, and two project-association mechanisms: save with `projects:` for plugin-authored entries (symlink-only), or link-project for pre-existing external research directories (plugin does not modify them). Writes to ~/research/.",
+    "longDescription": "Structured research with central persistence, horizontal topic libraries, deterministic source scoring, claim verification, lifecycle management, bulk ingestion, and two project-association mechanisms: save with `projects:` for plugin-authored entries (symlink-only), or link-project for pre-existing external research directories (plugin does not modify them). Writes to ~/research/.",
+    "developerName": "Ross Labs",
+    "category": "Research",
+    "capabilities": [
+      "Read",
+      "Write"
+    ]
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "plugins": [
+    "/Users/tyroneross/Desktop/git-folder/bookmark/.claude-plugin"
+  ],
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx @tyroneross/bookmark stop 2>/dev/null || echo '{\"decision\": \"approve\"}'",
+            "timeout": 10000
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx @tyroneross/bookmark precompact 2>/dev/null || echo '{}'",
+            "timeout": 10000
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx @tyroneross/bookmark restore 2>/dev/null || echo '{}'",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx @tyroneross/bookmark check 2>/dev/null || true",
+            "timeout": 3000,
+            "async": true
+          }
+        ]
+      }
+    ]
+  }
+}

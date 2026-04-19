@@ -20,30 +20,52 @@ Restart Claude Code. The `/research:*` slash commands should autocomplete; the `
 
 ## First run
 
-Any `/research ...` session writes its output to `~/research/` automatically. Or bootstrap explicitly:
+By default, any `/research ...` session writes its markdown corpus to `~/research/` and keeps its SQLite index there too. Or bootstrap explicitly:
 
 ```bash
 python ~/.claude/plugins/research/research.py init
 ```
 
+## Roots
+
+The plugin now supports separate roots for content and derived index/state:
+
+- `RESEARCH_CONTENT_DIR` — canonical markdown corpus, generated markdown views, archive, inbox, project symlinks
+- `RESEARCH_INDEX_DIR` — SQLite DB, linked-project registry, verifier logs, extract cache
+- `RESEARCH_BASE_DIR` — legacy compatibility alias; if the new vars are unset, both roots fall back here
+
+Default behavior is unchanged:
+
+- content root: `~/research/`
+- index root: `~/research/`
+
 ## Layout
 
-- `~/research/topics/<topic-tree>/<slug>.md` — canonical entries
-- `~/research/indices/<topic>.md` — auto-generated Maps of Content
-- `~/research/index.md`, `by-topic.md`, `by-project.md`, `review-due.md`, `PORTFOLIO.md` — auto-generated dashboards
-- `~/research/archive/` — archived entries (never deleted, redirect stubs left behind)
-- `~/research/.db.sqlite3` — FTS5 index, domain scores, verifier log
-- `~/research/inbox/` — fleeting notes / files queued via `/research:ingest --inbox`
+Content root:
+
+- `<content-root>/topics/<topic-tree>/<slug>.md` — canonical entries
+- `<content-root>/indices/<topic>.md` — auto-generated Maps of Content
+- `<content-root>/index.md`, `by-topic.md`, `by-project.md`, `review-due.md`, `PORTFOLIO.md` — auto-generated dashboards
+- `<content-root>/archive/` — archived entries (never deleted, redirect stubs left behind)
+- `<content-root>/inbox/` — fleeting notes / files queued via `/research:ingest --inbox`
+- `<content-root>/projects/` — project symlink views
+
+Index root:
+
+- `<index-root>/.db.sqlite3` — FTS5 index, domain scores, verifier state
+- `<index-root>/.linked-projects.json` — linked external project registry
+- `<index-root>/verifier-log/` — verification artifacts
+- `<index-root>/.extract-cache/` — Omniparse extract cache
 
 ## Per-project research
 
 Two mechanisms, depending on who authored the research.
 
-**Plugin-authored entries** — when an entry's frontmatter includes `projects: [foo]` and a project directory exists, `/research:save` maintains a symlink at `~/research/projects/foo/<slug>.md` pointing to the canonical entry under `~/research/topics/`. The project directory is not modified. Pass `--with-project-index` if you also want a `<project>/RossLabs-Research.md` index file written into the project (opt-in).
+**Plugin-authored entries** — when an entry's frontmatter includes `projects: [foo]` and a project directory exists, `/research:save` maintains a symlink at `<content-root>/projects/foo/<slug>.md` pointing to the canonical entry under `<content-root>/topics/`. The project directory is not modified. Pass `--with-project-index` if you also want a `<project>/RossLabs-Research.md` index file written into the project (opt-in).
 
-**Pre-existing project research** — for directories like `~/Desktop/git-folder/SpeakSavvy-iOS/docs/research/` that predate this plugin and should not be restructured, use `/research:link-project <name> <path>`. The plugin walks the directory recursively for `*.md` files, extracts a title and a 1-line summary from each, records the registration in `~/research/.linked-projects.json`, and creates symlinks at `~/research/projects/<name>/<filename>`. The source directory is never modified.
+**Pre-existing project research** — for directories like `~/Desktop/git-folder/SpeakSavvy-iOS/docs/research/` that predate this plugin and should not be restructured, use `/research:link-project <name> <path>`. The plugin walks the directory recursively for `*.md` files, extracts a title and a 1-line summary from each, records the registration in `<index-root>/.linked-projects.json`, and creates symlinks at `<content-root>/projects/<name>/<filename>`. The source directory is never modified.
 
-Both mechanisms surface in `~/research/PORTFOLIO.md` under separate sections ("Plugin-managed projects" and "Linked external research directories"). `/research:index` refreshes both.
+Both mechanisms surface in `<content-root>/PORTFOLIO.md` under separate sections ("Plugin-managed projects" and "Linked external research directories"). `/research:index` refreshes both.
 
 Legacy v0.3.0 artifacts (`<project>/research/` file copies, `<project>/research/.live/` symlinks, `<project>/RossLabs-Research.md`) are preserved as-is — v0.3.1 does not write to these paths by default, but also does not delete them. A one-time note is printed when the plugin touches a project that still has them.
 
@@ -51,7 +73,7 @@ Legacy v0.3.0 artifacts (`<project>/research/` file copies, `<project>/research/
 
 | Command | Purpose |
 |---|---|
-| `/research:init` | Bootstrap `~/research/` layout and DB |
+| `/research:init` | Bootstrap the configured content and index roots |
 | `/research:save <file>` | Persist an entry (Phase 6 entry point); writes canonical + project symlink, regenerates portfolio. `--with-project-index` to also write `<project>/RossLabs-Research.md` |
 | `/research:ingest <path>` | Bulk-ingest existing markdown files; `--inbox` to park, `--save` to persist drafts |
 | `/research:search <query>` | FTS5-ranked search |
@@ -83,3 +105,16 @@ A user-installed `omniparse` on `PATH` will be preferred over the vendored copy 
 - **Deterministic over clever** — same URL always scores the same tier; same claim always routes to the same verifier.
 - **Never delete** — archive + redirect stubs preserve all inbound links.
 - **Three layers** — TL;DR (≤150 words, extractive), Notes (bolded key passages + citations), Raw (verbatim source excerpts for future verification).
+
+## Codex
+
+This package now ships an additive Codex plugin surface alongside the existing Claude Code package. The Claude package remains authoritative for Claude behavior; the Codex package adds a parallel `.codex-plugin/plugin.json` install surface without changing the Claude runtime.
+
+Package root for Codex installs:
+- the repository root (`.`)
+
+Primary Codex surface:
+- skills from `./skills` when present
+- MCP config from `(none)` when present
+
+Install the package from this package root using your current Codex plugin install flow. The Codex package is additive only: Claude-specific hooks, slash commands, and agent wiring remain unchanged for Claude Code.

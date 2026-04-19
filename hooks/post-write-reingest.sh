@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Silent PostToolUse hook: if the Write/Edit touched ~/research/topics/*.md,
-# re-ingest that entry into the SQLite index and rebuild markdown indexes.
+# Silent PostToolUse hook: if the Write/Edit touched the configured content
+# root's topics/*.md tree, re-ingest that entry into the SQLite index and
+# rebuild markdown indexes.
 # Never blocks Claude on failure.
 
 set -e
@@ -22,9 +23,15 @@ fi
 
 [ -z "$file_path" ] && exit 0
 
-# Only fire for research entries under ~/research/topics/**.md
+# Resolve the content root. RESEARCH_BASE_DIR is preserved as a compatibility alias.
+content_root="${RESEARCH_CONTENT_DIR:-${RESEARCH_BASE_DIR:-$HOME/research}}"
+case "$content_root" in
+  "~"/*) content_root="$HOME/${content_root#~/}" ;;
+esac
+
+# Only fire for research entries under <content-root>/topics/**.md
 case "$file_path" in
-  "$HOME"/research/topics/*/*.md)
+  "$content_root"/topics/*/*.md)
     python3 "${CLAUDE_PLUGIN_ROOT}/research.py" save --file "$file_path" --skip-symlink >/dev/null 2>&1 || true
     ;;
   *)

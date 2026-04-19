@@ -6,9 +6,11 @@ Subcommands (v0.2): score, verify
 Subcommands (v0.3): review, compress
 Subcommands (bridges): extract (Omniparse)
 
-Data lives at ~/research/. SQLite FTS5 is the index. Claude Code's
-WebFetch/Read are assumed to have already extracted source content
-into entry files; this script persists, queries, scores, and verifies.
+Canonical markdown lives under a configurable content root (default:
+~/research). SQLite FTS5 and other operational state can live under a
+separate configurable index root. Claude Code's WebFetch/Read are
+assumed to have already extracted source content into entry files; this
+script persists, queries, scores, and verifies.
 """
 from __future__ import annotations
 
@@ -39,8 +41,10 @@ except ImportError:
 
 # ---------- Paths ----------
 
-BASE_DIR = Path(os.environ.get("RESEARCH_BASE_DIR", Path.home() / "research"))
-DB_PATH = BASE_DIR / ".db.sqlite3"
+LEGACY_BASE_DIR = Path(os.environ.get("RESEARCH_BASE_DIR", Path.home() / "research")).expanduser()
+CONTENT_DIR = Path(os.environ.get("RESEARCH_CONTENT_DIR", LEGACY_BASE_DIR)).expanduser()
+INDEX_DIR = Path(os.environ.get("RESEARCH_INDEX_DIR", LEGACY_BASE_DIR)).expanduser()
+DB_PATH = INDEX_DIR / ".db.sqlite3"
 PLUGIN_ROOT = Path(__file__).resolve().parent
 DATA_DIR = PLUGIN_ROOT / "data"
 GIT_FOLDER = Path(os.environ.get("RESEARCH_PROJECTS_DIR", Path.home() / "Desktop" / "git-folder"))
@@ -112,6 +116,14 @@ def db_connect() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON;")
     return conn
+
+
+def content_path(*parts: str) -> Path:
+    return CONTENT_DIR.joinpath(*parts)
+
+
+def index_path(*parts: str) -> Path:
+    return INDEX_DIR.joinpath(*parts)
 
 
 FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n?(.*)$", re.DOTALL)
@@ -218,19 +230,23 @@ def now_iso() -> str:
 
 
 def ensure_layout() -> None:
-    """Create ~/research/ layout if missing. Idempotent."""
-    BASE_DIR.mkdir(parents=True, exist_ok=True)
-    for sub in ("topics", "indices", "archive", "archive/raw", "inbox", "verifier-log"):
-        (BASE_DIR / sub).mkdir(parents=True, exist_ok=True)
-    readme = BASE_DIR / "README.md"
+    """Create the configured content and index roots if missing. Idempotent."""
+    CONTENT_DIR.mkdir(parents=True, exist_ok=True)
+    INDEX_DIR.mkdir(parents=True, exist_ok=True)
+    for sub in ("topics", "indices", "archive", "archive/raw", "inbox", "projects"):
+        content_path(sub).mkdir(parents=True, exist_ok=True)
+    for sub in ("verifier-log",):
+        index_path(sub).mkdir(parents=True, exist_ok=True)
+    readme = content_path("README.md")
     if not readme.exists():
         readme.write_text(
-            "# ~/research/\n\n"
-            "Central research knowledge base. Managed by the `research` Claude Code plugin.\n\n"
+            "# Research Content Root\n\n"
+            "Canonical research markdown lives in this directory. Managed by the `research` plugin.\n\n"
             "- `topics/<top>/<slug>.md` — canonical entries\n"
             "- `indices/` — auto-generated Maps of Content per topic\n"
             "- `archive/` — never-deleted moved entries (redirect stubs remain in `topics/`)\n"
-            "- `.db.sqlite3` — FTS5 index + domain scores + verifier log pointers\n\n"
+            f"- SQLite index root: `{INDEX_DIR}`\n"
+            f"- SQLite DB: `{DB_PATH}`\n\n"
             "Subcommands: run `python <plugin>/research.py --help`.\n"
             "Or use slash commands: `/research:search`, `/research:list`, `/research:review`, etc.\n\n"
             "## Searching\n\n"
@@ -305,7 +321,8 @@ def cmd_init(args: argparse.Namespace) -> int:
     ensure_layout()
     ensure_db()
     added = seed_domain_scores(refresh=args.refresh_seeds)
-    print(f"Initialized ~/research/ at {BASE_DIR}")
+    print(f"Initialized research content at {CONTENT_DIR}")
+    print(f"Index root: {INDEX_DIR}")
     print(f"DB: {DB_PATH}")
     print(f"Seeded/refreshed {added} domain scores")
     return 0
@@ -314,7 +331,7 @@ def cmd_init(args: argparse.Namespace) -> int:
 # ---------- save ----------
 
 def _slug_to_path(slug: str) -> Path:
-    return BASE_DIR / "topics" / top_level_topic(slug) / f"{slug}.md"
+    return content_path("topics", top_level_topic(slug), f"{slug}.md")
 
 
 def _resolve_collision(slug: str, fm: dict) -> str:
@@ -360,13 +377,13 @@ def _summary_from_tldr(tldr: str, limit: int = 120) -> str:
 
 
 def _managed_projects_dir() -> Path:
-    """Return ~/research/projects/ — the central symlink home for plugin-managed projects."""
-    return BASE_DIR / "projects"
+    """Return the content-root projects dir for plugin-managed symlinks."""
+    return content_path("projects")
 
 
 def _linked_projects_registry_path() -> Path:
-    """Return ~/research/.linked-projects.json — registration file for link-project."""
-    return BASE_DIR / ".linked-projects.json"
+    """Return the index-root linked-project registry path."""
+    return index_path(".linked-projects.json")
 
 
 def _read_linked_projects_registry() -> dict:
@@ -429,12 +446,12 @@ def _note_v030_artifacts(project_path: Path) -> None:
 
 
 def _managed_symlink_path(project_name: str, canonical: Path) -> Path:
-    """Return ~/research/projects/<project_name>/<slug>.md — the central symlink target."""
+    """Return <content-root>/projects/<project_name>/<slug>.md — the central symlink target."""
     return _managed_projects_dir() / project_name / canonical.name
 
 
 def _write_managed_symlink(project_name: str, canonical: Path) -> Path:
-    """Create or refresh a symlink at ~/research/projects/<name>/<slug>.md -> canonical.
+    """Create or refresh a symlink at <content-root>/projects/<name>/<slug>.md -> canonical.
 
     Idempotent. Returns the symlink path.
     """
@@ -551,7 +568,7 @@ def _scan_linked_project_files(source_dir: Path) -> list[dict]:
 
 
 def _refresh_linked_project_symlinks(project_name: str, files: list[dict]) -> list[Path]:
-    """Refresh ~/research/projects/<name>/ symlinks for a linked external project.
+    """Refresh <content-root>/projects/<name>/ symlinks for a linked external project.
 
     Keeps one symlink per unique filename (collisions within one project resolve to last-seen).
     Wipes stale links that no longer appear in `files`. Returns list of link paths created.
@@ -698,7 +715,7 @@ def cmd_save(args: argparse.Namespace) -> int:
     conn.commit()
     conn.close()
 
-    # v0.3.1: plugin-managed projects get ONE symlink at ~/research/projects/<name>/<slug>.md.
+    # v0.3.1: plugin-managed projects get ONE symlink at <content-root>/projects/<name>/<slug>.md.
     # No file copies. No writes into the project directory (unless --with-project-index).
     project_outputs: list[tuple[str, Path]] = []  # (project_name, managed_symlink_path)
     with_project_index = bool(getattr(args, "with_project_index", False))
@@ -727,7 +744,7 @@ def cmd_save(args: argparse.Namespace) -> int:
         if with_project_index:
             print(f"    Index:   {GIT_FOLDER / proj / 'RossLabs-Research.md'}")
     if not skip_index:
-        print(f"  Portfolio: {BASE_DIR / 'PORTFOLIO.md'}")
+        print(f"  Portfolio: {content_path('PORTFOLIO.md')}")
     print(f"  Corroboration: {fm.get('corroboration', 0)}  Confidence: {fm.get('confidence')}")
     return 0
 
@@ -848,7 +865,7 @@ def cmd_link(args: argparse.Namespace) -> int:
     fm["projects"] = projs
     entry_path.write_text(dump_frontmatter(fm, body))
 
-    # v0.3.1: managed symlink under ~/research/projects/<name>/<slug>.md
+    # v0.3.1: managed symlink under <content-root>/projects/<name>/<slug>.md
     managed_link = _write_managed_symlink(project_name, entry_path)
     _note_v030_artifacts(proj_path)
     conn.close()
@@ -869,7 +886,7 @@ def _do_link_project(project_name: str, source_dir: Path) -> dict:
         raise ValueError(f"not a directory: {source_dir}")
 
     files = _scan_linked_project_files(source_dir)
-    # Refresh symlinks at ~/research/projects/<project_name>/
+    # Refresh symlinks at <content-root>/projects/<project_name>/
     _refresh_linked_project_symlinks(project_name, files)
 
     # Persist registry entry (without abspath — keep entry lean; can be rebuilt from path)
@@ -891,8 +908,8 @@ def cmd_link_project(args: argparse.Namespace) -> int:
     """Register an existing project research directory as a linked external source.
 
     Walks the directory recursively for *.md files, extracts title + 1-line summary,
-    records registration in ~/research/.linked-projects.json, creates symlinks under
-    ~/research/projects/<name>/. Does NOT modify the project directory.
+    records registration in the index-root registry, creates symlinks under
+    <content-root>/projects/<name>/. Does NOT modify the project directory.
     """
     ensure_layout()
     ensure_db()
@@ -965,7 +982,7 @@ def _rebuild_project_research_md(project_path: Path) -> Path | None:
     for top in sorted(by_top):
         lines.append(f"### {top}\n")
         for r in sorted(by_top[top], key=lambda x: x["slug"]):
-            # v0.3.1: link to canonical file under ~/research/ (no project file copies).
+            # v0.3.1: link to canonical file under the content root (no project file copies).
             canonical_path = Path(r["path"])
             confidence = r.get("confidence", "inferred") or "inferred"
             status = r.get("status", "evergreen") or "evergreen"
@@ -991,16 +1008,16 @@ def _rebuild_project_research_md(project_path: Path) -> Path | None:
     for top in sorted(by_top):
         total = total_by_top.get(top, len(by_top[top]))
         here = len(by_top[top])
-        lines.append(f"- `~/research/topics/{top}/` ({total} total entries, {here} here)\n")
+        lines.append(f"- `{content_path('topics', top)}/` ({total} total entries, {here} here)\n")
     lines.append("\n")
-    lines.append("For the full master portfolio across all your projects, see `~/research/PORTFOLIO.md`.\n")
+    lines.append(f"For the full master portfolio across all your projects, see `{content_path('PORTFOLIO.md')}`.\n")
 
     index_md.write_text("".join(lines))
     return index_md
 
 
 def _rebuild_portfolio() -> Path:
-    """Regenerate ~/research/PORTFOLIO.md with plugin-managed, linked, and cross-cutting sections."""
+    """Regenerate the content-root PORTFOLIO.md with plugin-managed, linked, and cross-cutting sections."""
     ensure_db()
     conn = db_connect()
     rows = [dict(r) for r in conn.execute(
@@ -1029,7 +1046,7 @@ def _rebuild_portfolio() -> Path:
     # --- Plugin-managed projects ---
     lines.append("## Plugin-managed projects\n\n")
     lines.append("_Entries saved through `/research:save` with a `projects:` tag. "
-                 "Symlinks live at `~/research/projects/<name>/`._\n\n")
+                 f"Symlinks live at `{content_path('projects')}/<name>/`._\n\n")
     if not by_project:
         lines.append("_No project-tagged entries yet._\n\n")
     for proj in sorted(by_project):
@@ -1043,7 +1060,7 @@ def _rebuild_portfolio() -> Path:
         lines.append(f"- Symlink dir: {symlink_dir}/\n")
         tops = sorted({top_level_topic(e["slug"]) for e in entries})
         for top in tops:
-            lines.append(f"- Central entries: ~/research/topics/{top}/\n")
+            lines.append(f"- Central entries: {content_path('topics', top)}/\n")
         lines.append("\n")
 
     # --- Linked external research directories ---
@@ -1094,9 +1111,9 @@ def _rebuild_portfolio() -> Path:
     lines.append("- Cited sources\n\n")
     lines.append("Reading order for max coverage:\n")
     lines.append("1. PORTFOLIO.md (this file) \u2014 corpus overview\n")
-    lines.append("2. ~/research/by-topic.md \u2014 flat topic index\n")
-    lines.append("3. ~/research/topics/<top-level>/*.md \u2014 individual entries\n")
-    out = BASE_DIR / "PORTFOLIO.md"
+    lines.append(f"2. {content_path('by-topic.md')} \u2014 flat topic index\n")
+    lines.append(f"3. {content_path('topics')}/*/*.md \u2014 individual entries\n")
+    out = content_path("PORTFOLIO.md")
     out.write_text("".join(lines))
     return out
 
@@ -1124,7 +1141,7 @@ def _rebuild_indexes() -> None:
             f"| {r['reviewed']} | [`{r['slug']}`]({r['path']}) | {r['title']} | "
             f"{', '.join(r['topics'])} | {r['confidence']} |\n"
         )
-    (BASE_DIR / "index.md").write_text("".join(lines))
+    content_path("index.md").write_text("".join(lines))
 
     # by-topic.md
     by_tag: dict[str, list[dict]] = {}
@@ -1137,7 +1154,7 @@ def _rebuild_indexes() -> None:
         for r in sorted(by_tag[tag], key=lambda x: x["reviewed"], reverse=True):
             lines.append(f"- [`{r['slug']}`]({r['path']}) — {r['title']} ({r['reviewed']}, {r['confidence']})\n")
         lines.append("\n")
-    (BASE_DIR / "by-topic.md").write_text("".join(lines))
+    content_path("by-topic.md").write_text("".join(lines))
 
     # by-project.md
     by_proj: dict[str, list[dict]] = {"(cross-cutting)": []}
@@ -1155,10 +1172,10 @@ def _rebuild_indexes() -> None:
         for r in sorted(by_proj[proj], key=lambda x: x["reviewed"], reverse=True):
             lines.append(f"- [`{r['slug']}`]({r['path']}) — {r['title']} ({r['reviewed']}, {r['confidence']})\n")
         lines.append("\n")
-    (BASE_DIR / "by-project.md").write_text("".join(lines))
+    content_path("by-project.md").write_text("".join(lines))
 
     # indices/<top-level>.md (MOCs)
-    indices_dir = BASE_DIR / "indices"
+    indices_dir = content_path("indices")
     indices_dir.mkdir(exist_ok=True)
     # Wipe stale MOCs
     for old in indices_dir.glob("*.md"):
@@ -1211,7 +1228,7 @@ def cmd_index(args: argparse.Namespace) -> int:
     ensure_db()
     _rebuild_indexes()
 
-    # v0.3.1: refresh plugin-managed symlinks at ~/research/projects/<name>/<slug>.md
+    # v0.3.1: refresh plugin-managed symlinks at <content-root>/projects/<name>/<slug>.md
     # from current DB state (covers cases where slugs were renamed or projects re-tagged).
     conn = db_connect()
     rows = conn.execute(
@@ -1283,7 +1300,7 @@ def cmd_archive(args: argparse.Namespace) -> int:
     orig = Path(row["path"])
     if not orig.exists():
         print(f"WARN: file missing, only updating DB: {orig}", file=sys.stderr)
-    dest = BASE_DIR / "archive" / f"{args.slug}.md"
+    dest = content_path("archive", f"{args.slug}.md")
     dest.parent.mkdir(parents=True, exist_ok=True)
     if orig.exists():
         shutil.move(str(orig), str(dest))
@@ -1641,7 +1658,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
             print(f"ERROR: atom {args.atom} not in {atoms_path}", file=sys.stderr)
             return 2
 
-    log_dir = BASE_DIR / "verifier-log" / args.slug
+    log_dir = index_path("verifier-log", args.slug)
     log_dir.mkdir(parents=True, exist_ok=True)
 
     results = []
@@ -1810,7 +1827,7 @@ def cmd_review(args: argparse.Namespace) -> int:
             f"{r['reviewed']} | {r.get('topic_velocity') or 'medium'} | "
             f"{'yes' if r['breakdown']['orphan'] else 'no'} |\n"
         )
-    (BASE_DIR / "review-due.md").write_text("".join(lines))
+    content_path("review-due.md").write_text("".join(lines))
     return 0
 
 
@@ -1839,7 +1856,7 @@ def cmd_compress(args: argparse.Namespace) -> int:
     sections = split_sections(body)
 
     # Archive pre-compress Raw content
-    archive_raw = BASE_DIR / "archive" / "raw" / f"{args.slug}.md"
+    archive_raw = content_path("archive", "raw", f"{args.slug}.md")
     archive_raw.parent.mkdir(parents=True, exist_ok=True)
     ts = now_iso()
     archive_content = (
@@ -1853,7 +1870,7 @@ def cmd_compress(args: argparse.Namespace) -> int:
         archive_raw.write_text(archive_content)
 
     # Log compression event
-    log = BASE_DIR / "verifier-log" / args.slug
+    log = index_path("verifier-log", args.slug)
     log.mkdir(parents=True, exist_ok=True)
     (log / f"compress-{ts.replace(':', '-')}.json").write_text(json.dumps({
         "event": "compress",
@@ -1895,12 +1912,12 @@ def cmd_compress(args: argparse.Namespace) -> int:
 # (WebFetch, Read) with a clear message — no extraction needed.
 #
 # All successful extracts flow through a SHA-256 content-hash cache at
-# ~/research/.extract-cache/<hash>-<flags>.md so re-reads are instant.
+# <index-root>/.extract-cache/<hash>-<flags>.md so re-reads are instant.
 # --no-cache bypasses.
 
 import hashlib
 
-EXTRACT_CACHE_DIR = BASE_DIR / ".extract-cache"
+EXTRACT_CACHE_DIR = index_path(".extract-cache")
 
 # Extensions Omniparse handles (PDF included).
 OMNIPARSE_EXTS = {
@@ -2197,7 +2214,7 @@ def cmd_recategorize(args: argparse.Namespace) -> int:
                 print(f"  SKIP: {old_slug} (file missing)")
                 continue
             new_top = top_level_topic(new_slug)
-            new_path = BASE_DIR / "topics" / new_top / f"{new_slug}.md"
+            new_path = content_path("topics", new_top, f"{new_slug}.md")
             new_path.parent.mkdir(parents=True, exist_ok=True)
             text = old_path.read_text()
             fm, body = parse_frontmatter(text)
@@ -2290,9 +2307,9 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         return 2
 
     if args.inbox:
-        # Just copy raw files to ~/research/inbox/, no draft, no save
+        # Just copy raw files to the content-root inbox, no draft, no save
         ensure_layout()
-        inbox = BASE_DIR / "inbox"
+        inbox = content_path("inbox")
         inbox.mkdir(parents=True, exist_ok=True)
         copied = 0
         files = [src] if src.is_file() else [p for p in src.rglob("*.md")]
@@ -2336,7 +2353,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         saved = 0
         for d in drafts:
             fm = d["frontmatter"]
-            tmp = BASE_DIR / "inbox" / f".ingest-{fm['slug']}.md"
+            tmp = content_path("inbox", f".ingest-{fm['slug']}.md")
             tmp.parent.mkdir(parents=True, exist_ok=True)
             tmp.write_text(dump_frontmatter(fm, d["body"]))
             # Reuse cmd_save by faking args
@@ -2361,7 +2378,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(prog="research.py", description="Central research knowledge base.")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    sp = sub.add_parser("init", help="Bootstrap ~/research/ and DB")
+    sp = sub.add_parser("init", help="Bootstrap research content and index roots")
     sp.add_argument("--refresh-seeds", action="store_true", help="Re-apply seed data (preserves manual overrides)")
     sp.set_defaults(func=cmd_init)
 
@@ -2402,7 +2419,7 @@ def main() -> int:
     sp = sub.add_parser(
         "link-project",
         help="Register an existing project research directory (v0.3.1). "
-        "Walks recursively, extracts title+summary, symlinks into ~/research/projects/<name>/.",
+        "Walks recursively, extracts title+summary, symlinks into the content-root projects dir.",
     )
     sp.add_argument("name", help="Short project name used for the symlink dir and registry key")
     sp.add_argument("--path", required=True, help="Absolute path to the research directory to link")
@@ -2450,7 +2467,7 @@ def main() -> int:
     sp.add_argument("path", help="File or directory of .md files")
     sp.add_argument("--project", help="Auto-tag drafts with this project")
     sp.add_argument("--topics", help="Comma-separated topics for drafts")
-    sp.add_argument("--inbox", action="store_true", help="Just copy files to ~/research/inbox/, no draft/save")
+    sp.add_argument("--inbox", action="store_true", help="Just copy files to the content-root inbox, no draft/save")
     sp.add_argument("--save", action="store_true", help="Persist each draft via the normal save flow")
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_ingest)
@@ -2462,7 +2479,7 @@ def main() -> int:
             "Routes all extraction through @tyroneross/omniparse. HTML URLs and "
             ".md/.txt/.json/.yaml files are rejected with a pointer to "
             "Claude's WebFetch/Read tools. Results are cached at "
-            "~/research/.extract-cache/ keyed by file SHA-256 + flag signature."
+            "<index-root>/.extract-cache/ keyed by file SHA-256 + flag signature."
         ),
     )
     sp.add_argument("target", help="Local file path or directory (URLs are rejected — use WebFetch)")
