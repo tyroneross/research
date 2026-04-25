@@ -4,6 +4,7 @@
 Subcommands (v0.1): init, save, search, list, link, index, archive
 Subcommands (v0.2): score, verify
 Subcommands (v0.3): review, compress
+Subcommands (v0.4): table-profile, db-profile, analyze-plan, analyze-run
 Subcommands (bridges): extract (Omniparse)
 
 Canonical markdown lives under a configurable content root (default:
@@ -16,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import os
 import random
@@ -29,6 +31,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, date
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -1753,6 +1756,648 @@ def _reingest(entry_path: Path) -> None:
     conn.close()
 
 
+# ---------- quantitative analysis ----------
+
+ANALYSIS_EXTS = {".csv", ".tsv", ".json", ".jsonl", ".sqlite", ".sqlite3", ".db"}
+
+
+def _file_sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _analysis_runs_dir() -> Path:
+    p = index_path("analysis-runs")
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def _analysis_input_type(path: Path) -> str:
+    ext = path.suffix.lower()
+    if ext == ".csv":
+        return "csv"
+    if ext == ".tsv":
+        return "tsv"
+    if ext in (".json", ".jsonl"):
+        return ext[1:]
+    if ext in (".sqlite", ".sqlite3", ".db"):
+        return "sqlite"
+    return "unknown"
+
+
+def _decimal_or_none(value: Any) -> Decimal | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    # Remove common visual separators but do not guess at percentages/currency.
+    text = text.replace(",", "")
+    try:
+        return Decimal(text)
+    except InvalidOperation:
+        return None
+
+
+def _sample_rows(rows: list[dict[str, Any]], n: int) -> list[dict[str, Any]]:
+    return rows[: max(n, 0)]
+
+
+def _summarize_table_rows(rows: list[dict[str, Any]], sample_size: int = 5) -> dict[str, Any]:
+    columns: list[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        for key in row.keys():
+            if key not in seen:
+                columns.append(key)
+                seen.add(key)
+
+    profile_cols: list[dict[str, Any]] = []
+    for col in columns:
+        values = [row.get(col) for row in rows]
+        blanks = sum(1 for v in values if v is None or str(v).strip() == "")
+        decimals: list[Decimal] = []
+        for v in values:
+            d = _decimal_or_none(v)
+            if d is not None:
+                decimals.append(d)
+        nonblank = max(len(values) - blanks, 0)
+        numeric_count = len(decimals)
+        inferred_type = "number" if nonblank and numeric_count == nonblank else "mixed"
+        if nonblank and numeric_count == 0:
+            inferred_type = "text"
+        if not nonblank:
+            inferred_type = "empty"
+        distinct_values = {str(v) for v in values if v is not None and str(v).strip() != ""}
+        col_profile: dict[str, Any] = {
+            "name": col,
+            "inferred_type": inferred_type,
+            "nonblank": nonblank,
+            "blank": blanks,
+            "distinct": len(distinct_values),
+        }
+        if decimals:
+            total = sum(decimals, Decimal("0"))
+            col_profile["numeric"] = {
+                "count": numeric_count,
+                "min": str(min(decimals)),
+                "max": str(max(decimals)),
+                "mean": str(total / Decimal(numeric_count)),
+            }
+        if 0 < len(distinct_values) <= 10:
+            col_profile["values"] = sorted(distinct_values)[:10]
+        profile_cols.append(col_profile)
+
+    return {
+        "row_count": len(rows),
+        "columns": profile_cols,
+        "sample_rows": _sample_rows(rows, sample_size),
+    }
+
+
+def _read_delimited_rows(path: Path, delimiter: str) -> list[dict[str, Any]]:
+    with path.open(newline="", encoding="utf-8-sig", errors="replace") as f:
+        reader = csv.DictReader(f, delimiter=delimiter)
+        return [dict(row) for row in reader]
+
+
+def _read_json_rows(path: Path) -> list[dict[str, Any]]:
+    if path.suffix.lower() == ".jsonl":
+        rows: list[dict[str, Any]] = []
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            if not line.strip():
+                continue
+            obj = json.loads(line)
+            rows.append(obj if isinstance(obj, dict) else {"value": obj})
+        return rows
+    data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    if isinstance(data, list):
+        return [x if isinstance(x, dict) else {"value": x} for x in data]
+    if isinstance(data, dict):
+        for key in ("rows", "data", "items", "records"):
+            maybe = data.get(key)
+            if isinstance(maybe, list):
+                return [x if isinstance(x, dict) else {"value": x} for x in maybe]
+        return [data]
+    return [{"value": data}]
+
+
+def _profile_table_file(path: Path, sample_size: int = 5) -> dict[str, Any]:
+    input_type = _analysis_input_type(path)
+    if input_type == "csv":
+        rows = _read_delimited_rows(path, ",")
+    elif input_type == "tsv":
+        rows = _read_delimited_rows(path, "\t")
+    elif input_type in ("json", "jsonl"):
+        rows = _read_json_rows(path)
+    else:
+        raise ValueError(f"unsupported table input type: {path.suffix}")
+    profile = _summarize_table_rows(rows, sample_size=sample_size)
+    profile.update({
+        "path": str(path),
+        "input_type": input_type,
+        "sha256": _file_sha256(path),
+    })
+    return profile
+
+
+def _profile_sqlite_db(path: Path, sample_size: int = 5) -> dict[str, Any]:
+    uri = f"file:{path}?mode=ro"
+    conn = sqlite3.connect(uri, uri=True)
+    conn.row_factory = sqlite3.Row
+    tables = [
+        dict(r) for r in conn.execute(
+            "SELECT name, type, sql FROM sqlite_master "
+            "WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY name"
+        ).fetchall()
+    ]
+    out_tables: list[dict[str, Any]] = []
+    for table in tables:
+        name = table["name"]
+        quoted = '"' + name.replace('"', '""') + '"'
+        row_count = conn.execute(f"SELECT COUNT(*) AS n FROM {quoted}").fetchone()["n"]
+        cols = [dict(r) for r in conn.execute(f"PRAGMA table_info({quoted})").fetchall()]
+        fks = [dict(r) for r in conn.execute(f"PRAGMA foreign_key_list({quoted})").fetchall()]
+        indexes = [dict(r) for r in conn.execute(f"PRAGMA index_list({quoted})").fetchall()]
+        sample = [dict(r) for r in conn.execute(f"SELECT * FROM {quoted} LIMIT ?", (sample_size,)).fetchall()]
+        table_profile = {
+            "name": name,
+            "type": table["type"],
+            "row_count": row_count,
+            "schema_sql": table.get("sql"),
+            "columns": [
+                {
+                    "name": c.get("name"),
+                    "declared_type": c.get("type"),
+                    "notnull": bool(c.get("notnull")),
+                    "default": c.get("dflt_value"),
+                    "primary_key_position": c.get("pk"),
+                }
+                for c in cols
+            ],
+            "foreign_keys": fks,
+            "indexes": indexes,
+            "sample_rows": sample,
+        }
+        if sample:
+            table_profile["sample_profile"] = _summarize_table_rows(sample, sample_size=sample_size)
+        out_tables.append(table_profile)
+    conn.close()
+    return {
+        "path": str(path),
+        "input_type": "sqlite",
+        "sha256": _file_sha256(path),
+        "tables": out_tables,
+    }
+
+
+def _profile_input(path: Path, sample_size: int = 5) -> dict[str, Any]:
+    input_type = _analysis_input_type(path)
+    if input_type == "sqlite":
+        return _profile_sqlite_db(path, sample_size=sample_size)
+    if input_type in ("csv", "tsv", "json", "jsonl"):
+        return _profile_table_file(path, sample_size=sample_size)
+    raise ValueError(f"unsupported input extension: {path.suffix}")
+
+
+def _certainty_from_profile(profile: dict[str, Any]) -> tuple[str, list[str]]:
+    reasons: list[str] = []
+    input_type = profile.get("input_type")
+    if input_type == "sqlite":
+        tables = profile.get("tables") or []
+        if not tables:
+            return "Low", ["database has no user tables/views"]
+        no_rows = [t["name"] for t in tables if int(t.get("row_count") or 0) == 0]
+        no_pk = [
+            t["name"] for t in tables
+            if t.get("type") == "table" and not any(c.get("primary_key_position") for c in t.get("columns", []))
+        ]
+        if no_rows:
+            reasons.append(f"empty tables/views: {', '.join(no_rows[:5])}")
+        if no_pk:
+            reasons.append(f"tables without primary keys: {', '.join(no_pk[:5])}")
+        if reasons:
+            return "Medium", reasons
+        return "High", ["structured SQLite input with table schemas and row counts"]
+    row_count = int(profile.get("row_count") or 0)
+    columns = profile.get("columns") or []
+    if row_count == 0:
+        return "Low", ["input has zero rows"]
+    if not columns:
+        return "Low", ["input has no detected columns"]
+    blank_heavy = [
+        c["name"] for c in columns
+        if row_count and (int(c.get("blank") or 0) / max(row_count, 1)) > 0.2
+    ]
+    mixed_cols = [c["name"] for c in columns if c.get("inferred_type") == "mixed"]
+    if blank_heavy or mixed_cols:
+        if blank_heavy:
+            reasons.append(f">20% blanks in: {', '.join(blank_heavy[:5])}")
+        if mixed_cols:
+            reasons.append(f"mixed type columns: {', '.join(mixed_cols[:5])}")
+        return "Medium", reasons
+    return "High", ["structured table input with detected columns and no major profile warnings"]
+
+
+def _analysis_script_text() -> str:
+    """Return the generated stdlib-only analysis script."""
+    return r'''#!/usr/bin/env python3
+"""Generated by research.py analyze-plan.
+
+Self-contained stdlib analysis runner. It reads analysis-plan.json, validates
+declared inputs by sha256, profiles the inputs, and writes results.json plus
+audit.md. It intentionally does not install packages, download code, or call
+network APIs.
+"""
+from __future__ import annotations
+
+import argparse
+import csv
+import hashlib
+import json
+import sqlite3
+from decimal import Decimal, InvalidOperation
+from pathlib import Path
+from typing import Any
+
+
+def file_sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def decimal_or_none(value: Any) -> Decimal | None:
+    if value is None or isinstance(value, bool):
+        return None
+    text = str(value).strip().replace(",", "")
+    if not text:
+        return None
+    try:
+        return Decimal(text)
+    except InvalidOperation:
+        return None
+
+
+def summarize_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    columns: list[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        for key in row:
+            if key not in seen:
+                seen.add(key)
+                columns.append(key)
+    out_cols: list[dict[str, Any]] = []
+    for col in columns:
+        vals = [row.get(col) for row in rows]
+        blanks = sum(1 for v in vals if v is None or str(v).strip() == "")
+        nums = [d for d in (decimal_or_none(v) for v in vals) if d is not None]
+        nonblank = len(vals) - blanks
+        distinct = {str(v) for v in vals if v is not None and str(v).strip() != ""}
+        inferred = "number" if nonblank and len(nums) == nonblank else "mixed"
+        if nonblank and not nums:
+            inferred = "text"
+        if not nonblank:
+            inferred = "empty"
+        item: dict[str, Any] = {
+            "name": col,
+            "inferred_type": inferred,
+            "nonblank": nonblank,
+            "blank": blanks,
+            "distinct": len(distinct),
+        }
+        if nums:
+            item["numeric"] = {
+                "count": len(nums),
+                "min": str(min(nums)),
+                "max": str(max(nums)),
+                "sum": str(sum(nums, Decimal("0"))),
+                "mean": str(sum(nums, Decimal("0")) / Decimal(len(nums))),
+            }
+        out_cols.append(item)
+    return {"row_count": len(rows), "columns": out_cols, "sample_rows": rows[:5]}
+
+
+def read_rows(path: Path, input_type: str) -> list[dict[str, Any]]:
+    if input_type in ("csv", "tsv"):
+        delim = "\t" if input_type == "tsv" else ","
+        with path.open(newline="", encoding="utf-8-sig", errors="replace") as f:
+            return [dict(r) for r in csv.DictReader(f, delimiter=delim)]
+    if input_type == "jsonl":
+        rows = []
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            if line.strip():
+                obj = json.loads(line)
+                rows.append(obj if isinstance(obj, dict) else {"value": obj})
+        return rows
+    if input_type == "json":
+        data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+        if isinstance(data, list):
+            return [x if isinstance(x, dict) else {"value": x} for x in data]
+        if isinstance(data, dict):
+            for key in ("rows", "data", "items", "records"):
+                maybe = data.get(key)
+                if isinstance(maybe, list):
+                    return [x if isinstance(x, dict) else {"value": x} for x in maybe]
+            return [data]
+        return [{"value": data}]
+    raise ValueError(f"unsupported table input type: {input_type}")
+
+
+def profile_sqlite(path: Path) -> dict[str, Any]:
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    tables = [dict(r) for r in conn.execute(
+        "SELECT name, type, sql FROM sqlite_master WHERE type IN ('table', 'view') "
+        "AND name NOT LIKE 'sqlite_%' ORDER BY name"
+    )]
+    out = []
+    for table in tables:
+        name = table["name"]
+        quoted = '"' + name.replace('"', '""') + '"'
+        row_count = conn.execute(f"SELECT COUNT(*) AS n FROM {quoted}").fetchone()["n"]
+        cols = [dict(r) for r in conn.execute(f"PRAGMA table_info({quoted})")]
+        fks = [dict(r) for r in conn.execute(f"PRAGMA foreign_key_list({quoted})")]
+        indexes = [dict(r) for r in conn.execute(f"PRAGMA index_list({quoted})")]
+        sample = [dict(r) for r in conn.execute(f"SELECT * FROM {quoted} LIMIT 5")]
+        out.append({
+            "name": name,
+            "type": table["type"],
+            "row_count": row_count,
+            "schema_sql": table.get("sql"),
+            "columns": cols,
+            "foreign_keys": fks,
+            "indexes": indexes,
+            "sample_rows": sample,
+        })
+    conn.close()
+    return {"tables": out}
+
+
+def certainty(profile: dict[str, Any], input_type: str) -> tuple[str, list[str]]:
+    if input_type == "sqlite":
+        tables = profile.get("tables") or []
+        if not tables:
+            return "Low", ["database has no user tables/views"]
+        no_pk = [
+            t["name"] for t in tables
+            if t.get("type") == "table" and not any(c.get("pk") for c in t.get("columns", []))
+        ]
+        if no_pk:
+            return "Medium", [f"tables without primary keys: {', '.join(no_pk[:5])}"]
+        return "High", ["structured SQLite input; schema and row counts profiled"]
+    rows = int(profile.get("row_count") or 0)
+    if rows == 0:
+        return "Low", ["input has zero rows"]
+    cols = profile.get("columns") or []
+    mixed = [c["name"] for c in cols if c.get("inferred_type") == "mixed"]
+    if mixed:
+        return "Medium", [f"mixed type columns: {', '.join(mixed[:5])}"]
+    return "High", ["structured table input; deterministic stdlib profiling completed"]
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--plan", required=True)
+    ap.add_argument("--out-dir", required=True)
+    args = ap.parse_args()
+    plan_path = Path(args.plan).resolve()
+    out_dir = Path(args.out_dir).resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    plan = json.loads(plan_path.read_text())
+    findings = []
+    validations = []
+    for inp in plan.get("inputs", []):
+        path = Path(inp["path"]).resolve()
+        actual_sha = file_sha256(path)
+        expected_sha = inp.get("sha256")
+        validations.append({
+            "name": f"sha256:{path.name}",
+            "passed": expected_sha == actual_sha,
+            "expected": expected_sha,
+            "actual": actual_sha,
+        })
+        input_type = inp.get("input_type")
+        if input_type == "sqlite":
+            profile = profile_sqlite(path)
+        else:
+            rows = read_rows(path, input_type)
+            profile = summarize_rows(rows)
+        level, reasons = certainty(profile, input_type)
+        findings.append({
+            "input": str(path),
+            "input_type": input_type,
+            "profile": profile,
+            "certainty": level,
+            "certainty_reasons": reasons,
+        })
+    all_valid = all(v["passed"] for v in validations)
+    result = {
+        "question": plan.get("question"),
+        "status": "passed" if all_valid else "validation_failed",
+        "validations": validations,
+        "findings": findings,
+        "limitations": plan.get("limitations", []),
+    }
+    (out_dir / "results.json").write_text(json.dumps(result, indent=2, default=str) + "\n")
+    lines = [
+        "# Analysis Audit\n\n",
+        f"Question: {plan.get('question') or 'unspecified'}\n\n",
+        f"Status: {result['status']}\n\n",
+        "## Findings\n\n",
+    ]
+    for f in findings:
+        lines.append(f"- `{f['input']}` ({f['input_type']}): certainty **{f['certainty']}** — {', '.join(f['certainty_reasons'])}\n")
+    lines.append("\n## Validations\n\n")
+    for v in validations:
+        lines.append(f"- {v['name']}: {'passed' if v['passed'] else 'failed'}\n")
+    if plan.get("limitations"):
+        lines.append("\n## Limitations\n\n")
+        for item in plan["limitations"]:
+            lines.append(f"- {item}\n")
+    (out_dir / "audit.md").write_text("".join(lines))
+    print(out_dir / "results.json")
+    print(out_dir / "audit.md")
+    return 0 if all_valid else 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+'''
+
+
+def cmd_table_profile(args: argparse.Namespace) -> int:
+    path = Path(args.input).expanduser().resolve()
+    if not path.exists() or not path.is_file():
+        print(f"ERROR: table input not found: {path}", file=sys.stderr)
+        return 2
+    try:
+        profile = _profile_table_file(path, sample_size=args.sample)
+    except (OSError, json.JSONDecodeError, csv.Error, ValueError) as e:
+        print(f"ERROR: could not profile table: {e}", file=sys.stderr)
+        return 2
+    if args.output:
+        out = Path(args.output).expanduser().resolve()
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(profile, indent=2, default=str) + "\n")
+        print(out)
+    else:
+        print(json.dumps(profile, indent=2, default=str))
+    return 0
+
+
+def cmd_db_profile(args: argparse.Namespace) -> int:
+    path = Path(args.db).expanduser().resolve()
+    if not path.exists() or not path.is_file():
+        print(f"ERROR: database not found: {path}", file=sys.stderr)
+        return 2
+    try:
+        profile = _profile_sqlite_db(path, sample_size=args.sample)
+    except sqlite3.Error as e:
+        print(f"ERROR: could not profile SQLite database: {e}", file=sys.stderr)
+        return 2
+    if args.output:
+        out = Path(args.output).expanduser().resolve()
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(profile, indent=2, default=str) + "\n")
+        print(out)
+    else:
+        print(json.dumps(profile, indent=2, default=str))
+    return 0
+
+
+def cmd_analyze_plan(args: argparse.Namespace) -> int:
+    ensure_layout()
+    inputs = [Path(p).expanduser().resolve() for p in args.input]
+    missing = [str(p) for p in inputs if not p.exists() or not p.is_file()]
+    if missing:
+        print(f"ERROR: missing input(s): {', '.join(missing)}", file=sys.stderr)
+        return 2
+    run_name = args.name or _slugify(args.question or "analysis")
+    stamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
+    run_dir = Path(args.out_dir).expanduser().resolve() if args.out_dir else _analysis_runs_dir() / f"{stamp}-{run_name}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    profiled_inputs: list[dict[str, Any]] = []
+    limitations = [
+        "Generated script performs deterministic profiling only until metric formulas or SQL are added to the plan.",
+        "Certainty reflects input structure and validation status, not external source credibility.",
+    ]
+    for path in inputs:
+        try:
+            profile = _profile_input(path, sample_size=args.sample)
+        except (OSError, json.JSONDecodeError, csv.Error, sqlite3.Error, ValueError) as e:
+            print(f"ERROR: could not profile {path}: {e}", file=sys.stderr)
+            return 2
+        level, reasons = _certainty_from_profile(profile)
+        profiled_inputs.append({
+            "path": str(path),
+            "input_type": profile["input_type"],
+            "sha256": profile["sha256"],
+            "profile_path": str(run_dir / f"{path.stem}.profile.json"),
+            "profile": profile,
+            "initial_certainty": level,
+            "certainty_reasons": reasons,
+        })
+        Path(profiled_inputs[-1]["profile_path"]).write_text(json.dumps(profile, indent=2, default=str) + "\n")
+
+    plan = {
+        "question": args.question,
+        "created": now_iso(),
+        "workflow": "quantitative-analysis",
+        "inputs": [
+            {
+                "path": p["path"],
+                "input_type": p["input_type"],
+                "sha256": p["sha256"],
+                "profile_path": p["profile_path"],
+                "initial_certainty": p["initial_certainty"],
+                "certainty_reasons": p["certainty_reasons"],
+            }
+            for p in profiled_inputs
+        ],
+        "metrics": [],
+        "validations": [
+            "input sha256 must match the profiled file",
+            "row counts and schemas should be reviewed before interpreting calculations",
+        ],
+        "certainty_rubric": {
+            "High": "structured input, known schema, deterministic calculation, validations pass",
+            "Medium": "some assumptions or partial validation, but data is usable",
+            "Low": "ambiguous grain/schema, extraction risk, failed validation, or missing critical data",
+        },
+        "limitations": limitations,
+        "script": str(run_dir / "analysis.py"),
+        "plan_json": str(run_dir / "analysis-plan.json"),
+    }
+    yaml_path = run_dir / "analysis-plan.yaml"
+    json_path = run_dir / "analysis-plan.json"
+    script_path = run_dir / "analysis.py"
+    script_path.write_text(_analysis_script_text())
+    script_path.chmod(0o700)
+    plan["script_sha256"] = _file_sha256(script_path)
+    yaml_path.write_text(yaml.safe_dump(plan, sort_keys=False, allow_unicode=True))
+    json_path.write_text(json.dumps(plan, indent=2, default=str) + "\n")
+
+    print(f"Analysis plan: {yaml_path}")
+    print(f"Plan JSON:     {json_path}")
+    print(f"Script:        {script_path}")
+    print("Next: python research.py analyze-run --plan " + str(yaml_path))
+    return 0
+
+
+def cmd_analyze_run(args: argparse.Namespace) -> int:
+    plan_path = Path(args.plan).expanduser().resolve()
+    if not plan_path.exists():
+        print(f"ERROR: plan not found: {plan_path}", file=sys.stderr)
+        return 2
+    try:
+        plan = yaml.safe_load(plan_path.read_text()) or {}
+    except yaml.YAMLError as e:
+        print(f"ERROR: invalid plan YAML: {e}", file=sys.stderr)
+        return 2
+    run_dir = plan_path.parent
+    script_path = Path(plan.get("script") or run_dir / "analysis.py").expanduser().resolve()
+    json_path = Path(plan.get("plan_json") or run_dir / "analysis-plan.json").expanduser().resolve()
+    if not script_path.exists():
+        print(f"ERROR: analysis script not found: {script_path}", file=sys.stderr)
+        return 2
+    expected_script_hash = plan.get("script_sha256")
+    if expected_script_hash and not args.allow_modified_script:
+        actual_script_hash = _file_sha256(script_path)
+        if actual_script_hash != expected_script_hash:
+            print("ERROR: analysis script hash differs from analysis-plan.yaml.", file=sys.stderr)
+            print(f"  Expected: {expected_script_hash}", file=sys.stderr)
+            print(f"  Actual:   {actual_script_hash}", file=sys.stderr)
+            print("Review the script, then rerun with --allow-modified-script if this edit is intentional.", file=sys.stderr)
+            return 2
+    if not json_path.exists():
+        json_path.write_text(json.dumps(plan, indent=2, default=str) + "\n")
+    proc = subprocess.run(
+        [sys.executable, str(script_path), "--plan", str(json_path), "--out-dir", str(run_dir)],
+        cwd=str(run_dir),
+        capture_output=True,
+        text=True,
+        timeout=args.timeout,
+    )
+    if proc.stdout:
+        sys.stdout.write(proc.stdout)
+    if proc.stderr:
+        sys.stderr.write(proc.stderr)
+    if proc.returncode != 0:
+        print(f"ERROR: analysis failed with exit code {proc.returncode}", file=sys.stderr)
+        return proc.returncode
+    print(f"Analysis artifacts: {run_dir}")
+    return 0
+
+
 # ---------- review ----------
 
 def _months_since(d_str: str | None) -> float:
@@ -1914,8 +2559,6 @@ def cmd_compress(args: argparse.Namespace) -> int:
 # All successful extracts flow through a SHA-256 content-hash cache at
 # <index-root>/.extract-cache/<hash>-<flags>.md so re-reads are instant.
 # --no-cache bypasses.
-
-import hashlib
 
 EXTRACT_CACHE_DIR = index_path(".extract-cache")
 
@@ -2445,6 +3088,32 @@ def main() -> int:
     sp.add_argument("--atom", help="Run a single atom by atom_id")
     sp.add_argument("--dry-run", action="store_true")
     sp.set_defaults(func=cmd_verify)
+
+    sp = sub.add_parser("table-profile", help="Profile a CSV/TSV/JSON table for quantitative analysis")
+    sp.add_argument("input", help="Path to .csv, .tsv, .json, or .jsonl")
+    sp.add_argument("--sample", type=int, default=5, help="Number of sample rows to include")
+    sp.add_argument("-o", "--output", help="Write profile JSON to this path")
+    sp.set_defaults(func=cmd_table_profile)
+
+    sp = sub.add_parser("db-profile", help="Profile a SQLite database schema and tables")
+    sp.add_argument("db", help="Path to .sqlite, .sqlite3, or .db")
+    sp.add_argument("--sample", type=int, default=5, help="Number of sample rows per table")
+    sp.add_argument("-o", "--output", help="Write profile JSON to this path")
+    sp.set_defaults(func=cmd_db_profile)
+
+    sp = sub.add_parser("analyze-plan", help="Create a stdlib Python analysis plan and script")
+    sp.add_argument("--input", action="append", required=True, help="Input file; repeat for multiple inputs")
+    sp.add_argument("--question", required=True, help="Quantitative/database question to answer")
+    sp.add_argument("--name", help="Run name suffix")
+    sp.add_argument("--sample", type=int, default=5, help="Sample rows for profiles")
+    sp.add_argument("--out-dir", help="Write analysis artifacts to this directory")
+    sp.set_defaults(func=cmd_analyze_plan)
+
+    sp = sub.add_parser("analyze-run", help="Run a generated quantitative analysis plan")
+    sp.add_argument("--plan", required=True, help="Path to analysis-plan.yaml")
+    sp.add_argument("--timeout", type=int, default=30, help="Execution timeout in seconds")
+    sp.add_argument("--allow-modified-script", action="store_true", help="Run even if analysis.py differs from the plan hash")
+    sp.set_defaults(func=cmd_analyze_run)
 
     sp = sub.add_parser("review", help="Surface stale entries")
     sp.add_argument("-n", type=int, default=20)

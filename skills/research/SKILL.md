@@ -1,13 +1,13 @@
 ---
 name: research
-description: "This skill should be used when the user asks to: GENERAL — \"research\", \"investigate\", \"evaluate\", \"compare options\", \"what's the current state of\", \"find out about\", \"look into\", \"assess\", \"review alternatives\", \"how does X work\", \"is X still maintained\", \"what's better X or Y\"; COLLECTION — \"extract findings from\", \"collect evidence from\", \"what does this source say\", \"pull data from\", \"analyze this document\", \"what are the key claims in\"; SYNTHESIS — \"synthesize\", \"summarize the findings\", \"executive summary\", \"what should we do based on\", \"combine these findings\", \"what does the research say\"; PERSIST — \"save research\", \"add to research library\", \"record this for later\". Covers structured research with web searches, documentation review, source verification, cited findings, evidence collection, synthesis into actionable output, and persistence to a central knowledge base at ~/research/."
+description: "This skill should be used when the user asks to: GENERAL — \"research\", \"investigate\", \"evaluate\", \"compare options\", \"what's the current state of\", \"find out about\", \"look into\", \"assess\", \"review alternatives\", \"how does X work\", \"is X still maintained\", \"what's better X or Y\"; COLLECTION — \"extract findings from\", \"collect evidence from\", \"what does this source say\", \"pull data from\", \"analyze this document\", \"what are the key claims in\"; SYNTHESIS — \"synthesize\", \"summarize the findings\", \"executive summary\", \"what should we do based on\", \"combine these findings\", \"what does the research say\"; QUANTITATIVE/DATABASE — \"calculate\", \"analyze this CSV\", \"analyze this database\", \"SQL\", \"table\", \"schema\", \"metrics\", \"what does the data show\"; PERSIST — \"save research\", \"add to research library\", \"record this for later\". Covers structured research with web searches, documentation review, source verification, cited findings, evidence collection, quantitative/database analysis, synthesis into actionable output, and persistence to a central knowledge base at ~/research/."
 ---
 
 # Research
 
 Structured research methodology for web and technical investigations. Produces cited, verified findings with confidence markers, persisted to a central knowledge base.
 
-Supports three workflows: **general research** (full 5-phase + persist), **collection** (source → evidence), and **synthesis** (evidence → output). All three end at Phase 6 (persist to `~/research/`) when the output warrants keeping.
+Supports four workflows: **general research** (full 5-phase + persist), **collection** (source → evidence), **synthesis** (evidence → output), and **quantitative/database analysis** (data/schema → generated Python analysis → certainty-graded results). All four end at Phase 6 (persist to `~/research/`) when the output warrants keeping.
 
 ## Workflow Detection
 
@@ -18,6 +18,7 @@ Route to the appropriate workflow based on user language:
 | "research", "investigate", "evaluate", "compare", "look into", "what's better X or Y" | **General Research** | Phases 1-6 below |
 | "extract", "collect", "what does this say", "pull data from", "analyze this document", "key claims" | **Collection** | `references/collection.md` |
 | "synthesize", "summarize findings", "executive summary", "what should we do", "combine findings" | **Executive/Authorial Synthesis** | `references/synthesis.md` |
+| "calculate", "quantitative", "analyze this CSV", "database", "SQL", "table", "schema", "metrics", "what does the data show" | **Quantitative / Database Analysis** | `references/quantitative-analysis.md` |
 | "save research", "add to research library", "record this" | **Persist existing findings** | `references/persistence.md` |
 
 **When ambiguous:** Ask the user. If they say "just research it," use General Research.
@@ -29,6 +30,7 @@ Route to the appropriate workflow based on user language:
 4. **Persistence** (Phase 6) to write the result into `~/research/`
 
 Steps 2-3 can be invoked independently when the user already has sources or evidence.
+Quantitative/database analysis can be inserted after collection whenever claims require calculations, SQL, table joins, or schema inspection.
 
 ---
 
@@ -82,6 +84,30 @@ When the user has collected evidence and needs structured output.
 
 Full synthesis methodology and mode details: `references/synthesis.md`
 Output format specification: `references/output-contracts.md`
+
+---
+
+## Quantitative / Database Analysis Workflow
+
+When research requires math, metrics, table analysis, SQL, or database reasoning.
+
+**Core rule:** The LLM frames the analysis; Python performs the calculation.
+
+Use this workflow before making quantitative claims from data:
+1. **Assess** — Define the question, input type, grain, schema, formulas, denominators, joins, and assumptions.
+2. **Profile** — Run `research.py table-profile <file>` for CSV/TSV/JSON or `research.py db-profile <db>` for SQLite.
+3. **Plan** — Run `research.py analyze-plan --input <path> --question "..."` to create `analysis-plan.yaml`, profiles, and a self-contained `analysis.py`.
+4. **Run** — Run `research.py analyze-run --plan <analysis-plan.yaml>` to produce `results.json` and `audit.md`.
+5. **Report** — State every quantitative finding with formula/query, validation status, limitations, and **High / Medium / Low** certainty.
+
+Certainty rubric:
+- **High** — Structured data, schema understood, deterministic formula/SQL, validation passes, no major assumptions.
+- **Medium** — Usable data with assumptions, partial schema ambiguity, missing values handled, or manual mapping.
+- **Low** — OCR/PDF extraction, ambiguous grain/denominator, uncertain joins, failed validations, or missing critical data.
+
+Default generated scripts are stdlib-only, local, and self-contained. Do not install packages or download code during analysis unless the user explicitly approves the environment change.
+
+Full methodology and safety rules: `references/quantitative-analysis.md`
 
 ---
 
@@ -235,6 +261,7 @@ For detailed methodology and output formats, consult:
 - **`references/source_scoring.md`** — Deterministic tier scoring pipeline (domain cache → rules → LLM residue)
 - **`references/collection.md`** — 4 collection modes (standard, technical PDF, concise, large corpus)
 - **`references/synthesis.md`** — 2 synthesis modes (authorial, executive) with MECE operationalization
+- **`references/quantitative-analysis.md`** — Quantitative/database workflow with generated Python analysis scripts and certainty rubric
 - **`references/output-contracts.md`** — Evidence package and synthesis output format specifications
 - **`references/templates.md`** — Output templates for each general research type
 - **`references/methodology.md`** — Extended methodology notes, anti-patterns, and research quality checklist

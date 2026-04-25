@@ -85,6 +85,10 @@ Legacy v0.3.0 artifacts (`<project>/research/` file copies, `<project>/research/
 | `/research:archive <slug>` | Move to archive, leave redirect stub |
 | `/research:score <url>` | Inspect or set source tier for a domain |
 | `/research:verify <slug>` | Run claim verification on an entry |
+| `/research:table-profile <path>` | Profile CSV/TSV/JSON data before quantitative analysis |
+| `/research:db-profile <path>` | Profile a SQLite database schema, row counts, indexes, and foreign keys |
+| `/research:analyze-plan --input <path> --question "..."` | Generate a self-contained stdlib Python analysis plan/script |
+| `/research:analyze-run --plan <analysis-plan.yaml>` | Run the generated analysis script and write results/audit artifacts |
 | `/research:review` | Surface stale / review-due entries |
 | `/research:compress <slug>` | Compact an entry's TL;DR and Raw sections |
 | `/research:extract <path>` | Route PDF/Excel/PPTX/Python/dir through vendored Omniparse |
@@ -102,6 +106,7 @@ A user-installed `omniparse` on `PATH` will be preferred over the vendored copy 
 ## Philosophy
 
 - **Non-LLM parsers first, LLM for judgment** — Claude's WebFetch/Read extract content; scripts compute what can be computed.
+- **Code does the math** — quantitative/database claims should go through profile → analysis plan → generated stdlib Python script → results/audit with High/Medium/Low certainty.
 - **Deterministic over clever** — same URL always scores the same tier; same claim always routes to the same verifier.
 - **Never delete** — archive + redirect stubs preserve all inbound links.
 - **Three layers** — TL;DR (≤150 words, extractive), Notes (bolded key passages + citations), Raw (verbatim source excerpts for future verification).
