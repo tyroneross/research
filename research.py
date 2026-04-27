@@ -921,7 +921,11 @@ def cmd_link_project(args: argparse.Namespace) -> int:
     """
     ensure_layout()
     ensure_db()
-    source = Path(args.path).expanduser()
+    source_value = args.path or args.path_arg
+    if not source_value:
+        print("ERROR: missing path. Use: link-project <name> <path> or link-project <name> --path <path>", file=sys.stderr)
+        return 2
+    source = Path(source_value).expanduser()
     if not source.is_absolute():
         source = (Path.cwd() / source).resolve()
     if not source.exists():
@@ -3196,7 +3200,8 @@ def main() -> int:
         "Walks recursively, extracts title+summary, symlinks into the content-root projects dir.",
     )
     sp.add_argument("name", help="Short project name used for the symlink dir and registry key")
-    sp.add_argument("--path", required=True, help="Absolute path to the research directory to link")
+    sp.add_argument("path_arg", nargs="?", help="Path to the research directory to link")
+    sp.add_argument("--path", help="Absolute path to the research directory to link")
     sp.add_argument("--no-index", action="store_true", help="Skip PORTFOLIO.md regen on this call")
     sp.set_defaults(func=cmd_link_project)
 
