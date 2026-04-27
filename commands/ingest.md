@@ -1,5 +1,5 @@
 ---
-description: Bulk-ingest existing markdown files into ~/research/ as draft entries
+description: Bulk-ingest existing markdown files into ~/dev/research/ as draft entries
 argument-hint: <path> [--project foo] [--topics a,b,c] [--inbox] [--save]
 allowed-tools: Bash, Read, Write
 ---
@@ -14,8 +14,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/research.py" ingest $ARGUMENTS
 
 - No flags: print drafts to stdout, do not save. Inspect, fill in topics/tags, then call `/research:save` per file.
 - `--save`: persist each draft via the normal save flow (creates canonical file, project copy, symlink, indexes).
-- `--inbox`: copy raw files to `~/research/inbox/` without any drafting or DB write. Use this to "park" sources you want to review later.
-- `--project foo`: auto-tag drafts with the named project (must match a directory under `~/Desktop/git-folder/`).
+- `--inbox`: copy raw files to `~/dev/research/inbox/` without any drafting or DB write. Use this to "park" sources you want to review later.
+- `--project foo`: auto-tag drafts with the named project (must match a directory under `~/dev/git-folder/`).
 - `--topics a,b,c`: comma-separated topic list applied to every draft.
 
 **Recommended LLM-assisted flow (slash command):**

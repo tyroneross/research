@@ -19,7 +19,7 @@ Extract structured content from local files through the user's own `@tyroneross/
 | Directory | Omniparse (`-r` to recurse) |
 | Markdown / txt / JSON / YAML | Claude's `Read` tool directly |
 
-**Caching:** Every successful extract is cached at `~/research/.extract-cache/<sha256>-<flags>.md` keyed by file content + flags. Re-reading the same file with the same flags is instant. `--no-cache` forces re-extraction.
+**Caching:** Every successful extract is cached at `~/dev/research/.extract-cache/<sha256>-<flags>.md` keyed by file content + flags. Re-reading the same file with the same flags is instant. `--no-cache` forces re-extraction.
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/research.py" extract $ARGUMENTS

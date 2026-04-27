@@ -24,7 +24,7 @@ fi
 [ -z "$file_path" ] && exit 0
 
 # Resolve the content root. RESEARCH_BASE_DIR is preserved as a compatibility alias.
-content_root="${RESEARCH_CONTENT_DIR:-${RESEARCH_BASE_DIR:-$HOME/research}}"
+content_root="${RESEARCH_CONTENT_DIR:-${RESEARCH_BASE_DIR:-$HOME/dev/research}}"
 case "$content_root" in
   "~"/*) content_root="$HOME/${content_root#~/}" ;;
 esac

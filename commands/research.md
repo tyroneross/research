@@ -1,5 +1,5 @@
 ---
-description: Run the full research flow on a topic — frame, source, execute, synthesize, deliver, persist to ~/research/
+description: Run the full research flow on a topic — frame, source, execute, synthesize, deliver, persist to ~/dev/research/
 argument-hint: <topic-or-question>
 ---
 
@@ -18,4 +18,4 @@ If no topic was given, ask the user what they want researched.
 
 For non-HTML sources (PDF, Excel, PPTX, Python, directories), use `/research:extract <path>` to populate the Raw section.
 
-Other subcommands available: `/research:save`, `/research:search`, `/research:list`, `/research:link`, `/research:index`, `/research:archive`, `/research:score`, `/research:verify`, `/research:review`, `/research:compress`, `/research:extract`.
+Other subcommands available: `/research:save`, `/research:search`, `/research:list`, `/research:link`, `/research:link-project`, `/research:sync`, `/research:index`, `/research:archive`, `/research:score`, `/research:verify`, `/research:table-profile`, `/research:db-profile`, `/research:analyze-plan`, `/research:analyze-run`, `/research:review`, `/research:compress`, `/research:extract`.

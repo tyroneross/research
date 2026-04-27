@@ -21,7 +21,7 @@ staleness = 0.4 * months_since_reviewed * velocity_weight
 - `inbound_count`: from `inbound:` frontmatter, auto-maintained by `research.py index`. 0 inbound = orphan candidate.
 - `corroboration_loss`: 1 if any source domain has been downgraded in `domain_scores` since `captured`, else 0.
 
-Threshold: entries with `staleness > 3.0` land in `~/research/review-due.md` top-N.
+Threshold: entries with `staleness > 3.0` land in `~/dev/research/review-due.md` top-N.
 
 ## Review surface
 
@@ -46,7 +46,7 @@ python research.py archive prompting.chain-of-thought
 ```
 
 Effects:
-1. Move `~/research/topics/prompting/prompting.chain-of-thought.md` → `~/research/archive/prompting.chain-of-thought.md`.
+1. Move `~/dev/research/topics/prompting/prompting.chain-of-thought.md` → `~/dev/research/archive/prompting.chain-of-thought.md`.
 2. Write a 3-line redirect stub at the original path:
    ```markdown
    ---
@@ -72,13 +72,13 @@ python research.py compress prompting.chain-of-thought
 ```
 
 Effects:
-1. Copy pre-compression state to `~/research/archive/raw/prompting.chain-of-thought.md` (full original Raw content).
+1. Copy pre-compression state to `~/dev/research/archive/raw/prompting.chain-of-thought.md` (full original Raw content).
 2. Claude regenerates:
    - `## TL;DR` from current Notes (re-extractive, ≤150 words).
    - Each `### <url>` block in Raw → 2–3 sentence summary with a link back to the archive copy.
 3. Notes section is untouched.
 4. Update `reviewed:` to today.
-5. Write a compression log entry to `~/research/verifier-log/<slug>/compress-<timestamp>.json` with byte counts before/after.
+5. Write a compression log entry to `~/dev/research/verifier-log/<slug>/compress-<timestamp>.json` with byte counts before/after.
 
 **Reversible**: restoring the entry is a straight copy from `archive/raw/<slug>.md` back into the entry file's Raw section.
 

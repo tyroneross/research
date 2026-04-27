@@ -1,18 +1,18 @@
 # research plugin
 
-Central, token-efficient research knowledge base. Persists findings to `~/research/` with project-local symlinks, deterministic source tier scoring, and optional claim verification.
+Central, token-efficient research knowledge base. Persists findings to `~/dev/research/` with project-local symlinks, deterministic source tier scoring, and optional claim verification.
 
 ## Scope
 
 - Single-user personal tool. Not published to any marketplace.
-- Data lives at `~/research/` (separate from this plugin dir so the plugin can be replaced without touching knowledge).
+- Data lives at `~/dev/research/` (separate from this plugin dir so the plugin can be replaced without touching knowledge).
 - One Python script (`research.py`) with subcommands handles all mutations.
 - SQLite FTS5 (stdlib `sqlite3`) is the index. No external search service.
 - Claude's built-in `WebFetch` and `Read` tools do source extraction — no Python extraction library needed.
 
 ## Entry point
 
-- Slash commands: `/research:init`, `/research:save`, `/research:search`, `/research:list`, `/research:link`, `/research:link-project`, `/research:index`, `/research:archive`, `/research:score`, `/research:verify`, `/research:table-profile`, `/research:db-profile`, `/research:analyze-plan`, `/research:analyze-run`, `/research:review`, `/research:compress`, `/research:extract`, `/research:ingest`, `/research:recategorize`
+- Slash commands: `/research:init`, `/research:save`, `/research:search`, `/research:list`, `/research:link`, `/research:link-project`, `/research:sync`, `/research:index`, `/research:archive`, `/research:score`, `/research:verify`, `/research:table-profile`, `/research:db-profile`, `/research:analyze-plan`, `/research:analyze-run`, `/research:review`, `/research:compress`, `/research:extract`, `/research:ingest`, `/research:recategorize`
 - Direct: `python ${CLAUDE_PLUGIN_ROOT}/research.py <subcommand>`
 - Via skill: user language matching the `research` skill's description triggers the full-flow, which ends by persisting via Phase 6.
 
@@ -22,16 +22,16 @@ Central, token-efficient research knowledge base. Persists findings to `~/resear
 2. `research` skill runs Phases 1-5 (frame → source → execute → synthesize → deliver) using existing methodology.
 3. **Phase 6**: Claude writes a three-layer markdown entry (TL;DR / Notes / Raw) with rich frontmatter, then invokes `research.py save` which:
    - upserts into SQLite,
-   - writes the canonical entry to `~/research/topics/<top>/<slug>.md`,
-   - for each project in `projects:`, maintains a symlink at `~/research/projects/<project-name>/<slug>.md` pointing to the canonical entry (link-only; no writes into the project directory),
-   - regenerates `~/research/PORTFOLIO.md` (master corpus index across all projects),
+   - writes the canonical entry to `~/dev/research/topics/<top>/<slug>.md`,
+   - for each project in `projects:`, maintains a symlink at `~/dev/research/projects/<project-name>/<slug>.md` pointing to the canonical entry (link-only; no writes into the project directory),
+   - regenerates `~/dev/research/PORTFOLIO.md` (master corpus index across all projects),
    - triggers index rebuild for the central indexes via hook.
 
 Pass `--no-index` to defer portfolio regen on a single save (run `/research:index` to flush). Pass `--with-project-index` to opt in to writing `<project>/RossLabs-Research.md` inside the project (default is to leave the project untouched).
 
 ## Linking existing project research
 
-For project directories that already contain research markdown files the plugin did not author (for example `~/Desktop/git-folder/SpeakSavvy-iOS/docs/research/`), use `/research:link-project <name> <path>`. The plugin walks the directory recursively for `*.md` files, extracts a title (first `# H1`) and a 1-line summary (first paragraph, first sentence, truncated to 120 chars) from each, records the registration in `~/research/.linked-projects.json`, and creates symlinks at `~/research/projects/<name>/<filename>`. The source directory is never modified. Re-running the command refreshes the registration and symlinks (idempotent); `/research:index` also re-scans every registered linked project.
+For project directories that already contain research markdown files the plugin did not author (for example `~/dev/git-folder/SpeakSavvy-iOS/docs/research/`), use `/research:link-project <name> <path>`. The plugin walks the directory recursively for `*.md` files, extracts a title (first `# H1`) and a 1-line summary (first paragraph, first sentence, truncated to 120 chars) from each, records the registration in `~/dev/research/.linked-projects.json`, and creates symlinks at `~/dev/research/projects/<name>/<filename>`. The source directory is never modified. Re-running the command refreshes the registration and symlinks (idempotent); `/research:index` also re-scans every registered linked project.
 
 The portfolio has two project sections: "Plugin-managed projects" (from save's `projects:` tag) and "Linked external research directories" (from link-project). Cross-cutting entries (no project tag) appear below.
 

@@ -5,10 +5,11 @@ Subcommands (v0.1): init, save, search, list, link, index, archive
 Subcommands (v0.2): score, verify
 Subcommands (v0.3): review, compress
 Subcommands (v0.4): table-profile, db-profile, analyze-plan, analyze-run
+Subcommands (v0.5): sync
 Subcommands (bridges): extract (Omniparse)
 
 Canonical markdown lives under a configurable content root (default:
-~/research). SQLite FTS5 and other operational state can live under a
+~/dev/research). SQLite FTS5 and other operational state can live under a
 separate configurable index root. Claude Code's WebFetch/Read are
 assumed to have already extracted source content into entry files; this
 script persists, queries, scores, and verifies.
@@ -44,13 +45,15 @@ except ImportError:
 
 # ---------- Paths ----------
 
-LEGACY_BASE_DIR = Path(os.environ.get("RESEARCH_BASE_DIR", Path.home() / "research")).expanduser()
-CONTENT_DIR = Path(os.environ.get("RESEARCH_CONTENT_DIR", LEGACY_BASE_DIR)).expanduser()
-INDEX_DIR = Path(os.environ.get("RESEARCH_INDEX_DIR", LEGACY_BASE_DIR)).expanduser()
+DEFAULT_BASE_DIR = Path.home() / "dev" / "research"
+BASE_DIR = Path(os.environ.get("RESEARCH_BASE_DIR", DEFAULT_BASE_DIR)).expanduser()
+CONTENT_DIR = Path(os.environ.get("RESEARCH_CONTENT_DIR", BASE_DIR)).expanduser()
+INDEX_DIR = Path(os.environ.get("RESEARCH_INDEX_DIR", BASE_DIR)).expanduser()
 DB_PATH = INDEX_DIR / ".db.sqlite3"
 PLUGIN_ROOT = Path(__file__).resolve().parent
 DATA_DIR = PLUGIN_ROOT / "data"
-GIT_FOLDER = Path(os.environ.get("RESEARCH_PROJECTS_DIR", Path.home() / "Desktop" / "git-folder"))
+DEFAULT_PROJECTS_DIR = Path.home() / "dev" / "git-folder"
+GIT_FOLDER = Path(os.environ.get("RESEARCH_PROJECTS_DIR", DEFAULT_PROJECTS_DIR)).expanduser()
 
 
 # ---------- Schema ----------
@@ -1717,43 +1720,158 @@ def cmd_verify(args: argparse.Namespace) -> int:
     return 0
 
 
-def _reingest(entry_path: Path) -> None:
+def _normalise_entry_frontmatter(fm: dict) -> dict:
+    """Apply DB-safe defaults without rewriting the source markdown."""
+    if not fm.get("slug"):
+        raise ValueError("entry missing slug in frontmatter")
+    out = dict(fm)
+    out.setdefault("created", today_iso())
+    out.setdefault("reviewed", today_iso())
+    out.setdefault("status", "evergreen")
+    out.setdefault("workflow", "general")
+    out.setdefault("confidence", "inferred")
+    out.setdefault("corroboration", 0)
+    for list_key, default in [
+        ("topics", [top_level_topic(out["slug"])]),
+        ("projects", []),
+        ("tags", []),
+        ("sources", []),
+        ("related", []),
+        ("inbound", []),
+    ]:
+        if out.get(list_key) is None:
+            out[list_key] = default
+        elif not isinstance(out.get(list_key), list):
+            out[list_key] = [out[list_key]]
+    return out
+
+
+def _reingest(entry_path: Path) -> str:
     """Re-read an entry file and upsert into DB without touching filesystem."""
     text = entry_path.read_text()
     fm, body = parse_frontmatter(text)
+    fm = _normalise_entry_frontmatter(fm)
     sections = split_sections(body)
+    verification = fm.get("verification") or {}
+    row = (
+        fm["slug"],
+        str(entry_path.resolve()),
+        fm.get("title", ""),
+        json.dumps(fm.get("topics", [])),
+        json.dumps(fm.get("projects", [])),
+        json.dumps(fm.get("tags", [])),
+        json.dumps(fm.get("sources", [])),
+        fm.get("status", "evergreen"),
+        fm.get("workflow", "general"),
+        fm.get("created", today_iso()),
+        fm.get("reviewed", today_iso()),
+        fm.get("topic_velocity", "medium"),
+        fm.get("confidence", "inferred"),
+        int(fm.get("corroboration", 0) or 0),
+        sections["tldr"],
+        sections["notes"],
+        sections["raw"],
+        json.dumps(verification),
+        json.dumps(fm.get("inbound", [])),
+    )
     conn = db_connect()
     conn.execute(
         """
-        UPDATE entries SET
-          title=?, topics=?, projects=?, tags=?, sources=?, status=?, workflow=?,
-          created=?, reviewed=?, topic_velocity=?, confidence=?, corroboration=?,
-          tldr=?, notes=?, raw=?, verification=?, inbound=?
-        WHERE slug=?
+        INSERT INTO entries
+          (slug, path, title, topics, projects, tags, sources, status, workflow,
+           created, reviewed, topic_velocity, confidence, corroboration,
+           tldr, notes, raw, verification, inbound)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(slug) DO UPDATE SET
+          path=excluded.path,
+          title=excluded.title,
+          topics=excluded.topics,
+          projects=excluded.projects,
+          tags=excluded.tags,
+          sources=excluded.sources,
+          status=excluded.status,
+          workflow=excluded.workflow,
+          created=excluded.created,
+          reviewed=excluded.reviewed,
+          topic_velocity=excluded.topic_velocity,
+          confidence=excluded.confidence,
+          corroboration=excluded.corroboration,
+          tldr=excluded.tldr,
+          notes=excluded.notes,
+          raw=excluded.raw,
+          verification=excluded.verification,
+          inbound=excluded.inbound
         """,
-        (
-            fm.get("title", ""),
-            json.dumps(fm.get("topics", [])),
-            json.dumps(fm.get("projects", [])),
-            json.dumps(fm.get("tags", [])),
-            json.dumps(fm.get("sources", [])),
-            fm.get("status", "evergreen"),
-            fm.get("workflow", "general"),
-            fm.get("created", today_iso()),
-            fm.get("reviewed", today_iso()),
-            fm.get("topic_velocity", "medium"),
-            fm.get("confidence", "inferred"),
-            int(fm.get("corroboration", 0)),
-            sections["tldr"],
-            sections["notes"],
-            sections["raw"],
-            json.dumps(fm.get("verification") or {}),
-            json.dumps(fm.get("inbound", [])),
-            fm["slug"],
-        ),
+        row,
     )
     conn.commit()
     conn.close()
+    return fm["slug"]
+
+
+def _topic_entry_paths() -> list[Path]:
+    """Return canonical topic markdown paths under the configured content root."""
+    topics_dir = content_path("topics")
+    if not topics_dir.exists():
+        return []
+    return sorted(p for p in topics_dir.glob("*/*.md") if p.is_file())
+
+
+def cmd_sync(args: argparse.Namespace) -> int:
+    """Synchronize SQLite from canonical topic markdown without modifying entries."""
+    ensure_layout()
+    ensure_db()
+    seen: list[str] = []
+    skipped: list[tuple[Path, str]] = []
+    redirects = 0
+    for entry_path in _topic_entry_paths():
+        try:
+            seen.append(_reingest(entry_path))
+        except ValueError as e:
+            try:
+                fm, _body = parse_frontmatter(entry_path.read_text())
+            except OSError:
+                skipped.append((entry_path, str(e)))
+                continue
+            if fm.get("status") == "archived" and fm.get("redirect"):
+                redirects += 1
+                continue
+            skipped.append((entry_path, str(e)))
+        except (OSError, KeyError, yaml.YAMLError) as e:
+            skipped.append((entry_path, str(e)))
+
+    pruned = 0
+    if args.prune_missing:
+        conn = db_connect()
+        if seen:
+            placeholders = ",".join("?" for _ in seen)
+            pruned = conn.execute(
+                f"DELETE FROM entries WHERE slug NOT IN ({placeholders})",
+                seen,
+            ).rowcount
+        else:
+            print("WARN: no topic entries found; refusing to prune all DB rows", file=sys.stderr)
+        conn.commit()
+        conn.close()
+
+    if not args.no_index:
+        # Reuse the full index flow so indexes, managed symlinks, and linked projects refresh.
+        class _IndexArgs:
+            pass
+        cmd_index(_IndexArgs())  # type: ignore[arg-type]
+
+    print(f"Synced topic entries: {len(set(seen))}")
+    if redirects:
+        print(f"Ignored redirect stubs: {redirects}")
+    if pruned:
+        print(f"Pruned missing DB rows: {pruned}")
+    if skipped:
+        print(f"Skipped files: {len(skipped)}")
+        for path, reason in skipped[:10]:
+            print(f"  - {path}: {reason}")
+        if len(skipped) > 10:
+            print(f"  ... {len(skipped) - 10} more")
+    return 0
 
 
 # ---------- quantitative analysis ----------
@@ -3068,6 +3186,11 @@ def main() -> int:
     sp.add_argument("--path", required=True, help="Absolute path to the research directory to link")
     sp.add_argument("--no-index", action="store_true", help="Skip PORTFOLIO.md regen on this call")
     sp.set_defaults(func=cmd_link_project)
+
+    sp = sub.add_parser("sync", help="Rebuild SQLite from canonical topic markdown")
+    sp.add_argument("--prune-missing", action="store_true", help="Delete DB rows whose slug is not present under topics/")
+    sp.add_argument("--no-index", action="store_true", help="Skip markdown index and symlink refresh after DB sync")
+    sp.set_defaults(func=cmd_sync)
 
     sp = sub.add_parser("index", help="Rebuild markdown indexes + MOCs")
     sp.set_defaults(func=cmd_index)

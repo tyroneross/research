@@ -1,5 +1,5 @@
 ---
-description: Bootstrap ~/research/ directory, SQLite FTS5 database, and seed domain scores
+description: Bootstrap ~/dev/research/ directory, SQLite FTS5 database, and seed domain scores
 allowed-tools: Bash
 ---
 

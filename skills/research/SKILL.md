@@ -1,13 +1,13 @@
 ---
 name: research
-description: "This skill should be used when the user asks to: GENERAL — \"research\", \"investigate\", \"evaluate\", \"compare options\", \"what's the current state of\", \"find out about\", \"look into\", \"assess\", \"review alternatives\", \"how does X work\", \"is X still maintained\", \"what's better X or Y\"; COLLECTION — \"extract findings from\", \"collect evidence from\", \"what does this source say\", \"pull data from\", \"analyze this document\", \"what are the key claims in\"; SYNTHESIS — \"synthesize\", \"summarize the findings\", \"executive summary\", \"what should we do based on\", \"combine these findings\", \"what does the research say\"; QUANTITATIVE/DATABASE — \"calculate\", \"analyze this CSV\", \"analyze this database\", \"SQL\", \"table\", \"schema\", \"metrics\", \"what does the data show\"; PERSIST — \"save research\", \"add to research library\", \"record this for later\". Covers structured research with web searches, documentation review, source verification, cited findings, evidence collection, quantitative/database analysis, synthesis into actionable output, and persistence to a central knowledge base at ~/research/."
+description: "This skill should be used when the user asks to: GENERAL — \"research\", \"investigate\", \"evaluate\", \"compare options\", \"what's the current state of\", \"find out about\", \"look into\", \"assess\", \"review alternatives\", \"how does X work\", \"is X still maintained\", \"what's better X or Y\"; COLLECTION — \"extract findings from\", \"collect evidence from\", \"what does this source say\", \"pull data from\", \"analyze this document\", \"what are the key claims in\"; SYNTHESIS — \"synthesize\", \"summarize the findings\", \"executive summary\", \"what should we do based on\", \"combine these findings\", \"what does the research say\"; QUANTITATIVE/DATABASE — \"calculate\", \"analyze this CSV\", \"analyze this database\", \"SQL\", \"table\", \"schema\", \"metrics\", \"what does the data show\"; PERSIST — \"save research\", \"add to research library\", \"record this for later\". Covers structured research with web searches, documentation review, source verification, cited findings, evidence collection, quantitative/database analysis, synthesis into actionable output, and persistence to a central knowledge base at ~/dev/research/."
 ---
 
 # Research
 
 Structured research methodology for web and technical investigations. Produces cited, verified findings with confidence markers, persisted to a central knowledge base.
 
-Supports four workflows: **general research** (full 5-phase + persist), **collection** (source → evidence), **synthesis** (evidence → output), and **quantitative/database analysis** (data/schema → generated Python analysis → certainty-graded results). All four end at Phase 6 (persist to `~/research/`) when the output warrants keeping.
+Supports four workflows: **general research** (full 5-phase + persist), **collection** (source → evidence), **synthesis** (evidence → output), and **quantitative/database analysis** (data/schema → generated Python analysis → certainty-graded results). All four end at Phase 6 (persist to `~/dev/research/`) when the output warrants keeping.
 
 ## Workflow Detection
 
@@ -27,7 +27,7 @@ Route to the appropriate workflow based on user language:
 1. **General Research** (Phase 1-3) to identify and gather sources
 2. **Collection** to extract structured evidence from those sources
 3. **Synthesis** to transform evidence into actionable output
-4. **Persistence** (Phase 6) to write the result into `~/research/`
+4. **Persistence** (Phase 6) to write the result into `~/dev/research/`
 
 Steps 2-3 can be invoked independently when the user already has sources or evidence.
 Quantitative/database analysis can be inserted after collection whenever claims require calculations, SQL, table joins, or schema inspection.
@@ -219,9 +219,9 @@ Always include:
 
 1. **Derive slug** — Dendron-style dot-hierarchy from the topic tree.
    Examples: `prompting.chain-of-thought`, `db.postgres.pgvector`, `design.calm-precision.forms`.
-   Filename: `<slug>.md` inside `~/research/topics/<top-level-topic>/`.
+   Filename: `<slug>.md` inside `~/dev/research/topics/<top-level-topic>/`.
 
-2. **Detect project** — If `cwd` is under `~/Desktop/git-folder/<name>/`, set `projects: [<name>]`. Otherwise `projects: []`.
+2. **Detect project** — If `cwd` is under `~/dev/git-folder/<name>/`, set `projects: [<name>]`. Otherwise `projects: []`.
 
 3. **Write three-layer markdown file** with YAML frontmatter:
    - Frontmatter schema: see `references/persistence.md`.
@@ -235,13 +235,13 @@ Always include:
    ```bash
    python ${CLAUDE_PLUGIN_ROOT}/research.py save --file <path-to-entry>
    ```
-   The script upserts into SQLite, creates project symlink + INDEX.md line when `projects[]` is non-empty, and the PostToolUse hook regenerates `~/research/index.md`, `by-topic.md`, `by-project.md`, and per-topic MOCs.
+   The script upserts into SQLite, creates project symlink + INDEX.md line when `projects[]` is non-empty, and the PostToolUse hook regenerates `~/dev/research/index.md`, `by-topic.md`, `by-project.md`, and per-topic MOCs.
 
 6. **Verify (v0.2+)** — For entries with numeric, citation, symbolic, or code claims:
    ```bash
    python ${CLAUDE_PLUGIN_ROOT}/research.py verify <slug>
    ```
-   Updates `verification.*` frontmatter and writes per-atom artifacts to `~/research/verifier-log/<slug>/`.
+   Updates `verification.*` frontmatter and writes per-atom artifacts to `~/dev/research/verifier-log/<slug>/`.
 
 7. **Announce** — Report the canonical path, project symlink path (if any), corroboration count, and verification summary.
 

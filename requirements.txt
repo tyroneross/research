@@ -5,5 +5,5 @@ PyYAML>=6.0
 
 # Extraction: /research:extract routes through @tyroneross/omniparse (Node.js,
 # user-authored). Install/build it via:
-#   cd ~/Desktop/git-folder/Omniparse && npm install && npm run build
+#   cd ~/dev/git-folder/Omniparse && npm install && npm run build
 # No additional Python dependencies are required for extraction.

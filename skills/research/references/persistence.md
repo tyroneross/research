@@ -1,11 +1,11 @@
 # Persistence (Phase 6)
 
-How research gets saved into the central knowledge base at `~/research/`.
+How research gets saved into the central knowledge base at `~/dev/research/`.
 
 ## Layout
 
 ```
-~/research/
+~/dev/research/
   .db.sqlite3                   # FTS5 index, domain scores, verifier log
   README.md                     # auto-bootstrapped
   index.md                      # AUTO: chronological list of all entries
@@ -28,9 +28,9 @@ How research gets saved into the central knowledge base at `~/research/`.
 Plugin-managed projects (entries saved with `projects: [foo]` frontmatter) get a single symlink in the central data store:
 
 ```
-~/research/projects/
+~/dev/research/projects/
   <project-name>/
-    <slug>.md                   # symlink -> ~/research/topics/<top>/<slug>.md
+    <slug>.md                   # symlink -> ~/dev/research/topics/<top>/<slug>.md
 ```
 
 No files are written into the project directory by default. Pass `--with-project-index` to `/research:save` if you also want `<project>/RossLabs-Research.md` written (opt-in).
@@ -38,7 +38,7 @@ No files are written into the project directory by default. Pass `--with-project
 Linked external directories (registered via `/research:link-project <name> <path>`) are tracked in a registry:
 
 ```
-~/research/
+~/dev/research/
   .linked-projects.json         # {"<name>": {"path", "linked", "files": [{name, relpath, title, summary, mtime, size}]}}
   projects/
     <name>/
@@ -55,7 +55,7 @@ The source directory is never modified. `/research:index` re-scans every registe
   - `db.postgres.pgvector`
   - `design.calm-precision.forms`
 - Lowercase kebab-case segments. No spaces.
-- Top-level = the folder under `~/research/topics/`. Subsequent segments are purely in the filename.
+- Top-level = the folder under `~/dev/research/topics/`. Subsequent segments are purely in the filename.
 - Collision handling: if the exact slug exists with today's date, append `-v2`, `-v3`, ...
 
 ## Frontmatter schema
@@ -126,7 +126,7 @@ If neither resolves, the command explains that the vendored copy is missing or `
 
 ### Caching
 
-Every successful extract is cached at `~/research/.extract-cache/<sha256>-<flags>.md`. The cache key combines the file's SHA-256 (or a directory-listing hash for directories) with the active flag signature (`-f`, `-r`, `--sheet`, `--no-notes`). Re-reading the same file with the same flags is instant. Use `--no-cache` to force re-extract. Safe to delete the cache dir at any time.
+Every successful extract is cached at `~/dev/research/.extract-cache/<sha256>-<flags>.md`. The cache key combines the file's SHA-256 (or a directory-listing hash for directories) with the active flag signature (`-f`, `-r`, `--sheet`, `--no-notes`). Re-reading the same file with the same flags is instant. Use `--no-cache` to force re-extract. Safe to delete the cache dir at any time.
 
 Guiding rule: **non-LLM parsers do extraction, Claude does synthesis.** Paste the markdown verbatim into `## Raw`, under a heading with the source path + capture date. The verifier chunks this later.
 
@@ -161,30 +161,30 @@ The Raw layer is what FTS5 indexes for retrieval and what the v0.2 verifier chun
 
 When `projects[]` is non-empty, `research.py save` maintains one symlink per project in the central data store:
 
-- `~/research/projects/<project-name>/<slug>.md` → `~/research/topics/<top>/<slug>.md`
+- `~/dev/research/projects/<project-name>/<slug>.md` → `~/dev/research/topics/<top>/<slug>.md`
 
-That is the only side-effect by default. The project directory itself is not touched. The project need not even exist at `~/Desktop/git-folder/<name>/` — the symlink is keyed by project name, not file system location.
+That is the only side-effect by default. The project directory itself is not touched. The project need not even exist at `~/dev/git-folder/<name>/` — the symlink is keyed by project name, not file system location.
 
 **Opt-in project index**: pass `--with-project-index` to also regenerate `<project>/RossLabs-Research.md` inside the project directory. Useful when you want the research surfaced to anyone browsing the repo (for example, humans reviewing a PR). Off by default so saves stay non-invasive.
 
-**Master view**: `~/research/PORTFOLIO.md` is regenerated on every save (unless `--no-index`) with a dedicated "Plugin-managed projects" section.
+**Master view**: `~/dev/research/PORTFOLIO.md` is regenerated on every save (unless `--no-index`) with a dedicated "Plugin-managed projects" section.
 
 ## Linked external directories (v0.3.1)
 
-Some projects already have research directories the plugin did not author (for example `~/Desktop/git-folder/SpeakSavvy-iOS/docs/research/` with 17 markdown files in flat/plain format). Copying them into the plugin's layout would be destructive; instead, register them.
+Some projects already have research directories the plugin did not author (for example `~/dev/git-folder/SpeakSavvy-iOS/docs/research/` with 17 markdown files in flat/plain format). Copying them into the plugin's layout would be destructive; instead, register them.
 
 ```
-python research.py link-project speaksavvy --path ~/Desktop/git-folder/SpeakSavvy-iOS/docs/research/
-# or: /research:link-project speaksavvy ~/Desktop/git-folder/SpeakSavvy-iOS/docs/research/
+python research.py link-project speaksavvy --path ~/dev/git-folder/SpeakSavvy-iOS/docs/research/
+# or: /research:link-project speaksavvy ~/dev/git-folder/SpeakSavvy-iOS/docs/research/
 ```
 
 What happens:
 
 1. Walks the source directory recursively for `*.md` files.
 2. For each file, extracts a title (first `# H1`, or filename stem) and a 1-line summary (first paragraph, first sentence, truncated to ~120 chars). Pure deterministic — no LLM calls.
-3. Records the registration in `~/research/.linked-projects.json` as `{<name>: {path, linked, files: [{name, relpath, title, summary, mtime, size}]}}`.
-4. Creates symlinks at `~/research/projects/<name>/<filename>` pointing to the real files.
-5. Appends a "Linked external research directories" section to `~/research/PORTFOLIO.md`.
+3. Records the registration in `~/dev/research/.linked-projects.json` as `{<name>: {path, linked, files: [{name, relpath, title, summary, mtime, size}]}}`.
+4. Creates symlinks at `~/dev/research/projects/<name>/<filename>` pointing to the real files.
+5. Appends a "Linked external research directories" section to `~/dev/research/PORTFOLIO.md`.
 
 The source directory is never modified. Re-running the command refreshes the registration and symlinks; `/research:index` also re-scans every registered linked project (detects new files, removes deleted ones, refreshes summaries).
 
@@ -205,7 +205,7 @@ If a project contains `<project>/research/` file copies, `<project>/research/.li
 If you realize later that research `prompting.chain-of-thought` is relevant to a project:
 
 1. Edit frontmatter to add the project: `projects: [atomize-ai]`.
-2. Run `python research.py link prompting.chain-of-thought ~/Desktop/git-folder/atomize-ai`.
+2. Run `python research.py link prompting.chain-of-thought ~/dev/git-folder/atomize-ai`.
 3. Script creates the symlink and appends to that project's `INDEX.md`.
 
 ## Archival (v0.3 preview)
@@ -214,4 +214,4 @@ If you realize later that research `prompting.chain-of-thought` is relevant to a
 
 ## Bootstrap
 
-On any invocation, if `~/research/` is missing, `research.py` creates the full layout, the SQLite DB with FTS5 tables, and seeds `domain_scores` from `data/domain-scores-seed.json` (v0.2+).
+On any invocation, if `~/dev/research/` is missing, `research.py` creates the full layout, the SQLite DB with FTS5 tables, and seeds `domain_scores` from `data/domain-scores-seed.json` (v0.2+).

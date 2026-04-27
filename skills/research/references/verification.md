@@ -38,7 +38,7 @@ Based on the FActScore / FacTool decompose-extract-retrieve-verify pattern, stri
 
 ## Verifier output
 
-Each atom produces `~/research/verifier-log/<slug>/<atom_id>.json`:
+Each atom produces `~/dev/research/verifier-log/<slug>/<atom_id>.json`:
 
 ```json
 {

@@ -18,6 +18,6 @@ Routes each atom to its verifier:
 - `citation` — OpenAlex lookup by DOI or title
 - `code` — sandboxed Python subprocess (Docker if available)
 
-Writes per-atom JSON artifacts to `~/research/verifier-log/<slug>/`, updates entry frontmatter with `verification.*` counts, and recomputes `confidence` from corroboration + pass rate.
+Writes per-atom JSON artifacts to `~/dev/research/verifier-log/<slug>/`, updates entry frontmatter with `verification.*` counts, and recomputes `confidence` from corroboration + pass rate.
 
 See `references/verification.md` for the full contract.

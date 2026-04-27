@@ -4,7 +4,7 @@ argument-hint: [-n 20] [--topic <topic>]
 allowed-tools: Bash
 ---
 
-Compute a per-entry staleness score and list the top-N. Also writes `~/research/review-due.md` for reference.
+Compute a per-entry staleness score and list the top-N. Also writes `~/dev/research/review-due.md` for reference.
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/research.py" review $ARGUMENTS

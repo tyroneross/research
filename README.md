@@ -20,7 +20,7 @@ Restart Claude Code. The `/research:*` slash commands should autocomplete; the `
 
 ## First run
 
-By default, any `/research ...` session writes its markdown corpus to `~/research/` and keeps its SQLite index there too. Or bootstrap explicitly:
+By default, any `/research ...` session writes its markdown corpus to `~/dev/research/` and keeps its SQLite index there too. Or bootstrap explicitly:
 
 ```bash
 python ~/.claude/plugins/research/research.py init
@@ -34,10 +34,10 @@ The plugin now supports separate roots for content and derived index/state:
 - `RESEARCH_INDEX_DIR` — SQLite DB, linked-project registry, verifier logs, extract cache
 - `RESEARCH_BASE_DIR` — legacy compatibility alias; if the new vars are unset, both roots fall back here
 
-Default behavior is unchanged:
+Default behavior:
 
-- content root: `~/research/`
-- index root: `~/research/`
+- content root: `~/dev/research/`
+- index root: `~/dev/research/`
 
 ## Layout
 
@@ -63,7 +63,7 @@ Two mechanisms, depending on who authored the research.
 
 **Plugin-authored entries** — when an entry's frontmatter includes `projects: [foo]` and a project directory exists, `/research:save` maintains a symlink at `<content-root>/projects/foo/<slug>.md` pointing to the canonical entry under `<content-root>/topics/`. The project directory is not modified. Pass `--with-project-index` if you also want a `<project>/RossLabs-Research.md` index file written into the project (opt-in).
 
-**Pre-existing project research** — for directories like `~/Desktop/git-folder/SpeakSavvy-iOS/docs/research/` that predate this plugin and should not be restructured, use `/research:link-project <name> <path>`. The plugin walks the directory recursively for `*.md` files, extracts a title and a 1-line summary from each, records the registration in `<index-root>/.linked-projects.json`, and creates symlinks at `<content-root>/projects/<name>/<filename>`. The source directory is never modified.
+**Pre-existing project research** — for directories like `~/dev/git-folder/SpeakSavvy-iOS/docs/research/` that predate this plugin and should not be restructured, use `/research:link-project <name> <path>`. The plugin walks the directory recursively for `*.md` files, extracts a title and a 1-line summary from each, records the registration in `<index-root>/.linked-projects.json`, and creates symlinks at `<content-root>/projects/<name>/<filename>`. The source directory is never modified.
 
 Both mechanisms surface in `<content-root>/PORTFOLIO.md` under separate sections ("Plugin-managed projects" and "Linked external research directories"). `/research:index` refreshes both.
 
@@ -80,6 +80,7 @@ Legacy v0.3.0 artifacts (`<project>/research/` file copies, `<project>/research/
 | `/research:list [N]` | Recent entries |
 | `/research:link <slug>` | Retroactive project symlink for a saved entry |
 | `/research:link-project <name> <path>` | Register an existing external research directory (plugin does not modify it) |
+| `/research:sync` | Rebuild SQLite from canonical topic markdown; use `--prune-missing` after moves or migrations |
 | `/research:index` | Rebuild central indexes, refresh plugin-managed symlinks, re-scan linked external projects, and rewrite `PORTFOLIO.md` |
 | `/research:recategorize` | Suggest splits for top-level topics that have grown too large (read-only) |
 | `/research:archive <slug>` | Move to archive, leave redirect stub |
