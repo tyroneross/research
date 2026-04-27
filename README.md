@@ -5,8 +5,8 @@ Personal research plugin for Claude Code. Keeps a central, searchable, lifecycle
 ## Install
 
 ```
-/plugin marketplace add tyroneross/research
-/plugin install research@research
+/plugin marketplace add tyroneross/research-plugin
+/plugin install research@research-plugin
 ```
 
 Then install the Python dependency:
