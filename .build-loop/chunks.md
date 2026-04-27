@@ -21,7 +21,7 @@ Separate canonical markdown storage from derived index/state storage without cha
 
 ### Acceptance
 
-- default install still behaves like `~/research`
+- default install still behaves like `~/dev/research`
 - plugin can initialize with different content and index roots
 - save/search/index continue to work against the refactored path helpers
 

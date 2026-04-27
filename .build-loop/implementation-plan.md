@@ -2,7 +2,7 @@
 
 ## Recommendation
 
-Re-architect the plugin so that **Obsidian is the content system of record** and **SQLite is a derived local index and metadata layer**. Do not keep `~/research` as the primary long-term corpus if the user's actual knowledge workflow lives in `/Users/tyroneross/Documents/Obsidian Vault`.
+Re-architect the plugin so that **Obsidian is the content system of record** and **SQLite is a derived local index and metadata layer**. Do not keep `~/dev/research` as the primary long-term corpus if the user's actual knowledge workflow lives in `/Users/tyroneross/Documents/Obsidian Vault`.
 
 Constraint update:
 
@@ -21,19 +21,19 @@ That gives the cleanest separation:
 
 ### 1.1 Storage
 
-- Canonical notes are written to `~/research/topics/<top>/<slug>.md`.
+- Canonical notes are written to `~/dev/research/topics/<top>/<slug>.md`.
 - Secondary generated artifacts live beside them:
-  - `~/research/index.md`
-  - `~/research/by-topic.md`
-  - `~/research/by-project.md`
-  - `~/research/review-due.md`
-  - `~/research/PORTFOLIO.md`
-  - `~/research/archive/`
-  - `~/research/projects/<project>/...` symlinks
+  - `~/dev/research/index.md`
+  - `~/dev/research/by-topic.md`
+  - `~/dev/research/by-project.md`
+  - `~/dev/research/review-due.md`
+  - `~/dev/research/PORTFOLIO.md`
+  - `~/dev/research/archive/`
+  - `~/dev/research/projects/<project>/...` symlinks
 
 ### 1.2 Index
 
-- SQLite database lives at `~/research/.db.sqlite3`.
+- SQLite database lives at `~/dev/research/.db.sqlite3`.
 - It stores:
   - `entries`
   - `entries_fts`
@@ -54,12 +54,12 @@ SQLite is not a passive implementation detail. It is used directly by the produc
 
 ### 1.4 Project Association
 
-- Plugin-authored notes: `projects:` frontmatter creates central symlinks under `~/research/projects/`.
+- Plugin-authored notes: `projects:` frontmatter creates central symlinks under `~/dev/research/projects/`.
 - External project research: `link-project` registers external markdown directories and creates symlinks under the same central tree.
 
 ### 1.5 Architectural Tension
 
-The plugin currently assumes the note corpus should live in `~/research/`.
+The plugin currently assumes the note corpus should live in `~/dev/research/`.
 
 Your stated preference is different:
 
@@ -131,7 +131,7 @@ This keeps the plugin aligned with your actual note system while preserving fast
 - optional SymPy install
 - Node runtime for extraction
 - filesystem locations:
-  - current: `~/research`
+  - current: `~/dev/research`
   - desired: `/Users/tyroneross/Documents/Obsidian Vault`
 
 ---
@@ -223,7 +223,7 @@ That is the right dependency direction.
 
 ### Goal
 
-Stop assuming `~/research` is the canonical corpus.
+Stop assuming `~/dev/research` is the canonical corpus.
 
 ### Changes
 
@@ -391,14 +391,14 @@ Implementation note:
 
 1. Add config split: content root vs index root.
 2. Introduce `VaultAdapter` / path abstraction.
-3. Keep current `~/research` behavior as default compatibility mode.
+3. Keep current `~/dev/research` behavior as default compatibility mode.
 
 ## Phase B: Migration Mode
 
 1. Add Obsidian vault path support.
 2. Add full reindex-from-vault.
 3. Add migration tool:
-   - move or copy `~/research/topics/**` into vault
+   - move or copy `~/dev/research/topics/**` into vault
    - rebuild DB from vault
 
 ## Phase C: Search Upgrade
@@ -426,11 +426,11 @@ But redefine its role:
 - **required derived index**
 - **not canonical storage**
 
-## Decision 2: Stop Treating `~/research` As The Main Knowledge Base
+## Decision 2: Stop Treating `~/dev/research` As The Main Knowledge Base
 
 Yes, if your real usage is Obsidian.
 
-`~/research` should either:
+`~/dev/research` should either:
 
 - become compatibility mode, or
 - be deprecated in favor of vault-backed storage
@@ -487,4 +487,4 @@ Why second:
 
 ### Chunk 3
 
-Switch canonical write target from `~/research` to Obsidian vault once reindex is stable.
+Switch canonical write target from `~/dev/research` to Obsidian vault once reindex is stable.

@@ -1,7 +1,7 @@
 {
   "name": "research",
-  "version": "0.3.3",
-  "description": "Structured research with central persistence, horizontal topic libraries, deterministic source scoring, claim verification, lifecycle management, bulk ingestion, and two project-association mechanisms: save with `projects:` for plugin-authored entries (symlink-only), or link-project for pre-existing external research directories (plugin does not modify them). Writes to ~/research/.",
+  "version": "0.5.0",
+  "description": "Structured research with central persistence at ~/dev/research/, source scoring, claim verification, quantitative/database analysis, lifecycle management, bulk ingestion, sync-from-markdown, and project symlink views.",
   "author": {
     "name": "Tyrone Ross"
   },

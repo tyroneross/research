@@ -8,7 +8,7 @@ Convert the research report into an implementation plan for the `research` plugi
    - required vs optional dependencies
    - what is bundled in the plugin vs expected from the environment
    - where SQLite is actually used today
-4. Prioritize a migration path from the current `~/research`-centric design to an Obsidian-ingest-first design.
+4. Prioritize a migration path from the current `~/dev/research`-centric design to an Obsidian-ingest-first design.
 
 # Scoring Criteria
 

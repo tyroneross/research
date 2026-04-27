@@ -1,6 +1,6 @@
 {
   "plugins": [
-    "/Users/tyroneross/Desktop/git-folder/bookmark/.claude-plugin"
+    "/Users/tyroneross/dev/git-folder/bookmark/.claude-plugin"
   ],
   "hooks": {
     "Stop": [

@@ -20,8 +20,8 @@
     "appleDev": true
   },
   "architecture": {
-    "currentSourceOfTruth": "~/research markdown corpus",
-    "currentIndex": "SQLite FTS5 in ~/research/.db.sqlite3",
+    "currentSourceOfTruth": "~/dev/research markdown corpus",
+    "currentIndex": "SQLite FTS5 in ~/dev/research/.db.sqlite3",
     "desiredSourceOfTruth": "/Users/tyroneross/Documents/Obsidian Vault",
     "desiredIndex": "SQLite over Obsidian markdown corpus"
   },

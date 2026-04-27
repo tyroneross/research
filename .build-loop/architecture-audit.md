@@ -25,11 +25,11 @@ That keeps the plugin useful for fast search and workflow features without forci
 ## 1.2 Main data paths
 
 - Current canonical content root:
-  - `~/research`
+  - `~/dev/research`
 - Current DB:
-  - `~/research/.db.sqlite3`
+  - `~/dev/research/.db.sqlite3`
 - Current project association:
-  - `~/research/projects/<name>/...`
+  - `~/dev/research/projects/<name>/...`
 
 ## 1.3 Current plugin surfaces
 
@@ -169,7 +169,7 @@ These are optional today:
 
 ### Current
 
-- plugin owns canonical markdown in `~/research`
+- plugin owns canonical markdown in `~/dev/research`
 
 ### Recommended
 

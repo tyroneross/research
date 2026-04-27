@@ -146,7 +146,7 @@ def _stringify_dates(obj: Any) -> Any:
     return obj
 
 
-def parse_frontmatter(text: str) -> tuple[dict, str]:
+def parse_frontmatter(text: str, *, fatal: bool = True) -> tuple[dict, str]:
     m = FRONTMATTER_RE.match(text)
     if not m:
         return {}, text
@@ -154,6 +154,8 @@ def parse_frontmatter(text: str) -> tuple[dict, str]:
     try:
         fm = yaml.safe_load(fm_text) or {}
     except yaml.YAMLError as e:
+        if not fatal:
+            raise ValueError(f"invalid frontmatter YAML: {e}") from e
         print(f"ERROR parsing frontmatter: {e}", file=sys.stderr)
         sys.exit(2)
     return _stringify_dates(fm), body
@@ -1822,20 +1824,25 @@ def cmd_sync(args: argparse.Namespace) -> int:
     ensure_layout()
     ensure_db()
     seen: list[str] = []
+    seen_paths: dict[str, Path] = {}
     skipped: list[tuple[Path, str]] = []
+    duplicates: list[tuple[str, Path, Path]] = []
     redirects = 0
     for entry_path in _topic_entry_paths():
         try:
+            fm, _body = parse_frontmatter(entry_path.read_text(), fatal=False)
+            slug = fm.get("slug")
+            if not slug:
+                if fm.get("status") == "archived" and fm.get("redirect"):
+                    redirects += 1
+                    continue
+                raise ValueError("entry missing slug in frontmatter")
+            if slug in seen_paths:
+                duplicates.append((slug, seen_paths[slug], entry_path))
+                continue
             seen.append(_reingest(entry_path))
+            seen_paths[slug] = entry_path
         except ValueError as e:
-            try:
-                fm, _body = parse_frontmatter(entry_path.read_text())
-            except OSError:
-                skipped.append((entry_path, str(e)))
-                continue
-            if fm.get("status") == "archived" and fm.get("redirect"):
-                redirects += 1
-                continue
             skipped.append((entry_path, str(e)))
         except (OSError, KeyError, yaml.YAMLError) as e:
             skipped.append((entry_path, str(e)))
@@ -1863,6 +1870,12 @@ def cmd_sync(args: argparse.Namespace) -> int:
     print(f"Synced topic entries: {len(set(seen))}")
     if redirects:
         print(f"Ignored redirect stubs: {redirects}")
+    if duplicates:
+        print(f"Duplicate slugs: {len(duplicates)}")
+        for slug, first, duplicate in duplicates[:10]:
+            print(f"  - {slug}: kept {first}; duplicate {duplicate}")
+        if len(duplicates) > 10:
+            print(f"  ... {len(duplicates) - 10} more")
     if pruned:
         print(f"Pruned missing DB rows: {pruned}")
     if skipped:
