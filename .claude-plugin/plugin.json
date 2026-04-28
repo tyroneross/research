@@ -1,7 +1,7 @@
 {
   "name": "research",
   "version": "0.5.0",
-  "description": "Structured research with central persistence at ~/dev/research/, source scoring, claim verification, quantitative/database analysis, lifecycle management, bulk ingestion, sync-from-markdown, and project symlink views.",
+  "description": "Structured research with central knowledge base, source scoring, and claim verification",
   "author": {
     "name": "Tyrone Ross"
   },

@@ -1,6 +1,6 @@
 ---
 name: research
-description: "This skill should be used when the user asks to: GENERAL — \"research\", \"investigate\", \"evaluate\", \"compare options\", \"what's the current state of\", \"find out about\", \"look into\", \"assess\", \"review alternatives\", \"how does X work\", \"is X still maintained\", \"what's better X or Y\"; COLLECTION — \"extract findings from\", \"collect evidence from\", \"what does this source say\", \"pull data from\", \"analyze this document\", \"what are the key claims in\"; SYNTHESIS — \"synthesize\", \"summarize the findings\", \"executive summary\", \"what should we do based on\", \"combine these findings\", \"what does the research say\"; QUANTITATIVE/DATABASE — \"calculate\", \"analyze this CSV\", \"analyze this database\", \"SQL\", \"table\", \"schema\", \"metrics\", \"what does the data show\"; PERSIST — \"save research\", \"add to research library\", \"record this for later\". Covers structured research with web searches, documentation review, source verification, cited findings, evidence collection, quantitative/database analysis, synthesis into actionable output, and persistence to a central knowledge base at ~/dev/research/."
+description: Use to research, investigate, evaluate, compare options, extract findings, synthesize, analyze CSV/databases, or save to the research library. Sourced, verified, persisted to ~/dev/research/.
 ---
 
 # Research
