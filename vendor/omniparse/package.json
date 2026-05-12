@@ -7,7 +7,7 @@
   "bin": {
     "omniparse": "./dist/bin/omniparse.js"
   },
-  "license": "FSL-1.1-MIT",
+  "license": "Apache-2.0",
   "engines": {
     "node": ">=18.0.0"
   }
